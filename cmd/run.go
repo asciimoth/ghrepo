@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -105,11 +107,38 @@ func (c Runner) save(m contract.Manifest, r contract.Repository) error {
 	_, mp, _ := c.paths()
 	return contract.WriteManifest(mp, m, r)
 }
+
+var githubRepoName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+func initURLs(raw string) (string, string, error) {
+	repoURL := raw
+	if !strings.Contains(raw, "://") {
+		parts := strings.Split(raw, "/")
+		if len(parts) != 2 || !githubRepoName.MatchString(parts[0]) || !githubRepoName.MatchString(parts[1]) || parts[0] == "." || parts[0] == ".." || parts[1] == "." || parts[1] == ".." {
+			return "", "", errors.New("--repo must be user/repo or a GitHub HTTPS URL")
+		}
+		repoURL = "https://github.com/" + raw
+	}
+	u, err := url.Parse(repoURL)
+	if err != nil || u.Scheme != "https" || u.Host != "github.com" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return repoURL, "", nil
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 2 || !githubRepoName.MatchString(parts[0]) || !githubRepoName.MatchString(parts[1]) || parts[0] == "." || parts[0] == ".." || parts[1] == "." || parts[1] == ".." {
+		return repoURL, "", nil
+	}
+	siteURL := "https://" + strings.ToLower(parts[0]) + ".github.io"
+	if !strings.EqualFold(parts[1], parts[0]+".github.io") {
+		siteURL += "/" + parts[1]
+	}
+	return repoURL, siteURL, nil
+}
+
 func (c Runner) init(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	repo := fs.String("repo", "", "public repository HTTPS URL")
-	siteURL := fs.String("site", "", "site HTTPS base URL")
+	repo := fs.String("repo", "", "GitHub repository as user/repo or HTTPS URL")
+	siteURL := fs.String("site", "", "site HTTPS base URL (defaults to GitHub Pages)")
 	branch := fs.String("branch", "main", "")
 	sourceHosts := fs.String("source-hosts", "github.com", "")
 	redirectHosts := fs.String("redirect-hosts", "release-assets.githubusercontent.com,objects.githubusercontent.com", "")
@@ -123,7 +152,7 @@ func (c Runner) init(ctx context.Context, args []string) error {
 		return err
 	}
 	if fs.NArg() > 1 {
-		return errors.New("usage: ghrepo init [DIR] --repo URL --site URL")
+		return errors.New("usage: ghrepo init [DIR] --repo USER/REPO [--site URL]")
 	}
 	dir := c.root()
 	if fs.NArg() == 1 {
@@ -139,10 +168,20 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	} else {
-		if *repo == "" || *siteURL == "" {
-			return errors.New("init requires --repo and --site")
+		if *repo == "" {
+			return errors.New("init requires --repo")
 		}
-		r = contract.Repository{Schema: 1, Repository: contract.Repo{URL: *repo, Branch: *branch, Layout: "flat-v1"}, APT: contract.APT{Suite: "stable", Component: "main", Architectures: []string{"amd64", "arm64"}}, RPM: contract.RPM{ID: "ghrepo", Name: "Packages", Architectures: []string{"x86_64", "aarch64"}, PackageSignature: "metadata-only"}, Downloads: contract.Download{SourceHosts: splitList(*sourceHosts), RedirectHosts: splitList(*redirectHosts), MaxBytes: 2147483647}, Site: contract.Site{BaseURL: *siteURL, MaxBytes: 1073741824, RetentionDays: 30}, Storage: contract.Storage{Backend: "none"}}
+		repoURL, defaultSite, err := initURLs(*repo)
+		if err != nil {
+			return err
+		}
+		if *siteURL == "" {
+			if defaultSite == "" {
+				return errors.New("cannot derive GitHub Pages URL from --repo; set --site")
+			}
+			*siteURL = defaultSite
+		}
+		r = contract.Repository{Schema: 1, Repository: contract.Repo{URL: repoURL, Branch: *branch, Layout: "flat-v1"}, APT: contract.APT{Suite: "stable", Component: "main", Architectures: []string{"amd64", "arm64"}}, RPM: contract.RPM{ID: "ghrepo", Name: "Packages", Architectures: []string{"x86_64", "aarch64"}, PackageSignature: "metadata-only"}, Downloads: contract.Download{SourceHosts: splitList(*sourceHosts), RedirectHosts: splitList(*redirectHosts), MaxBytes: 2147483647}, Site: contract.Site{BaseURL: *siteURL, MaxBytes: 1073741824, RetentionDays: 30}, Storage: contract.Storage{Backend: "none"}}
 	}
 	if err := r.Validate(); err != nil {
 		return err

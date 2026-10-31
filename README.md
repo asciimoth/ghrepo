@@ -8,7 +8,7 @@ After building the `ghrepo` binary with `go build -o ghrepo .`, initialize a
 repository with public URLs, then add packages by HTTPS URL:
 
 ```sh
-ghrepo init --repo https://github.com/example/repo --site https://example.github.io/repo --source-hosts example.com
+ghrepo init --repo example/repo --source-hosts example.com
 ghrepo add https://example.com/releases/hello.deb
 ghrepo sync
 ghrepo source set deb/hello/amd64/1.2.0-1 https://example.com/releases/hello-moved.deb
@@ -39,6 +39,11 @@ signed metadata. It commits and pushes to `origin`. The ignored
 `.ghrepo-transaction/` directory records interrupted metadata swaps and is
 restored on the next `rebuild` or `check`.
 
+`init` accepts `user/repo` or a full GitHub HTTPS URL for `--repo`. It stores
+the full URL in `ghrepo.yaml`. If `--site` is absent, it uses
+`https://user.github.io/repo`. For a `user.github.io` repository, it uses
+`https://user.github.io`. Set `--site` to use a custom domain.
+
 ## Optional GitHub storage
 
 Set `storage.backend: github-releases`, `storage.release_prefix`, and
@@ -47,7 +52,7 @@ environment or ignored local settings. Release uploads need repository Contents
 write access. Include `github.com` in `downloads.source_hosts` for uploads.
 
 ```sh
-ghrepo init --repo https://github.com/example/repo --site https://example.github.io/repo --create-remote --configure-pages
+ghrepo init --repo example/repo --create-remote --configure-pages
 ghrepo add --upload ./hello.deb ./tool.rpm
 ghrepo add --upload --sign-rpm ./tool.rpm
 ghrepo gc

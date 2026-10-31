@@ -16,6 +16,43 @@ import (
 
 type fixtureFetcher struct{ data map[string][]byte }
 
+func TestInitRepoAndSiteURLs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		repo string
+		site string
+	}{
+		{"short repo", []string{"--repo", "example/packages"}, "https://github.com/example/packages", "https://example.github.io/packages"},
+		{"full repo", []string{"--repo", "https://github.com/example/packages"}, "https://github.com/example/packages", "https://example.github.io/packages"},
+		{"custom site", []string{"--repo", "example/packages", "--site", "https://packages.example.com"}, "https://github.com/example/packages", "https://packages.example.com"},
+		{"user site", []string{"--repo", "Example/Example.github.io"}, "https://github.com/Example/Example.github.io", "https://example.github.io"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			runner := Runner{Dir: dir}
+			if err := runner.Run(context.Background(), append([]string{"init"}, tt.args...)); err != nil {
+				t.Fatal(err)
+			}
+			r, err := contract.ReadRepository(filepath.Join(dir, "ghrepo.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Repository.URL != tt.repo || r.Site.BaseURL != tt.site {
+				t.Fatalf("got repo %q and site %q; want %q and %q", r.Repository.URL, r.Site.BaseURL, tt.repo, tt.site)
+			}
+		})
+	}
+}
+
+func TestInitRejectsInvalidShortRepo(t *testing.T) {
+	runner := Runner{Dir: t.TempDir()}
+	if err := runner.Run(context.Background(), []string{"init", "--repo", "example/../packages"}); err == nil {
+		t.Fatal("accepted invalid short repository")
+	}
+}
+
 func (f fixtureFetcher) Fetch(_ context.Context, raw string, _, _ []string) (io.ReadCloser, error) {
 	b, ok := f.data[raw]
 	if !ok {
