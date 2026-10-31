@@ -1,5 +1,4 @@
-// Package contract defines the version 1 repository file format.
-// Parsing and full validation are added in the offline core stage.
+// Package contract defines, parses, and validates the version 1 file format.
 package contract
 
 // Repository is the committed ghrepo.yaml document.
