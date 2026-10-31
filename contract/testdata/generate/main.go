@@ -18,6 +18,7 @@ func main() {
 	base := filepath.Join("..", "packages")
 	control := "Package: hello\nVersion: 1.2.0-1\nArchitecture: amd64\nMaintainer: Fixture <fixture@example.invalid>\nDescription: small offline fixture\n"
 	write(base, "hello_1.2.0-1_amd64.deb", deb(control, "control"))
+	write(base, "hello_2.0.0-1_amd64.deb", deb("Package: hello\nVersion: 2.0.0-1\nArchitecture: amd64\nMaintainer: Fixture <fixture@example.invalid>\nDescription: small offline fixture\n", "control"))
 	write(base, "hello_changed.deb", deb(control+"X-Fixture: changed bytes\n", "control"))
 	write(base, "hello_unsafe.deb", deb(control, "../control"))
 	write(base, "hello_malformed.deb", []byte("!<arch>\ninvalid archive"))

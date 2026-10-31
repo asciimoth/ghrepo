@@ -56,13 +56,15 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		return err
 	}
 	if len(args) == 0 {
-		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build")
+		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build")
 	}
 	switch args[0] {
 	case "init":
 		return c.init(ctx, args[1:])
 	case "add":
 		return c.add(ctx, args[1:])
+	case "update":
+		return c.update(ctx, args[1:])
 	case "replace":
 		return c.replacePackage(ctx, args[1:])
 	case "sync":
@@ -477,6 +479,10 @@ func (c Runner) add(ctx context.Context, args []string) error {
 }
 
 func addOne(ctx context.Context, raw, dir string, r contract.Repository, m *contract.Manifest, fetcher cache.Fetcher, replaceIndex int, now time.Time) error {
+	return addOneChecked(ctx, raw, dir, r, m, fetcher, replaceIndex, now, nil)
+}
+
+func addOneChecked(ctx context.Context, raw, dir string, r contract.Repository, m *contract.Manifest, fetcher cache.Fetcher, replaceIndex int, now time.Time, check func(contract.Package) error) error {
 	if err := contract.ValidateSourceURL(raw, r.Downloads.SourceHosts); err != nil {
 		return err
 	}
@@ -516,6 +522,11 @@ func addOne(ctx context.Context, raw, dir string, r contract.Repository, m *cont
 	p.Path, err = contract.ServedPath(p)
 	if err != nil {
 		return err
+	}
+	if check != nil {
+		if err := check(p); err != nil {
+			return err
+		}
 	}
 	if err := cache.VerifyFile(name, p); err != nil {
 		return err

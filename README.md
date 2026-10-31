@@ -44,7 +44,24 @@ transaction. `replace` checks new bytes with the same package identity and
 retains the old served path. `prune` previews retained paths that have passed
 the configured retention period and have no signed index or rollback reference;
 `--apply` removes these paths from the manifest. `check` checks source URLs,
-signatures, indexed package bytes, and the rendered site size.
+signatures, indexed package bytes, and the rendered site size. `update` checks
+active upstream packages whose source is a direct
+`https://github.com/OWNER/REPO/releases/download/TAG/ASSET` URL. It uses the
+repository's latest published GitHub release and selects an asset with the same
+name, or a name formed by replacing the old tag or package version. It downloads
+matching assets, verifies the package format, name, and architecture, and adds
+new versions to `packages.yaml`. Unsupported URLs and releases without a
+matching asset are reported and skipped. `update --dry-run` downloads matching
+assets to a temporary file and reports their package versions without changing
+the repository or its cache. `update` does not publish or push.
+
+```sh
+ghrepo init --repo example/repo --source-hosts github.com
+ghrepo add https://github.com/OWNER/REPO/releases/download/v1.0/app_1.0_amd64.deb
+ghrepo update --dry-run
+ghrepo update
+```
+
 `publish --dry-run` runs `sync`, `rebuild`, and `check`, then prints the exact
 Git path changes without committing or pushing. `publish` stages only the
 configuration, templates, public keys, manifest, workflow, and signed metadata.
