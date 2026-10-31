@@ -86,6 +86,59 @@ func TestInitRejectsInvalidShortRepo(t *testing.T) {
 	}
 }
 
+func TestMutatingCommandsAcceptDryRunWithoutRepositoryWrites(t *testing.T) {
+	ctx := context.Background()
+	data, err := os.ReadFile("../contract/testdata/packages/hello_1.2.0-1_amd64.deb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	url := "https://example.com/hello.deb"
+	runner := Runner{Dir: dir, Fetcher: fixtureFetcher{map[string][]byte{url: data, "https://example.com/moved.deb": data}}}
+	if err := runner.Run(ctx, []string{"init", "--dry-run", "--repo", "example/repo"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ghrepo.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry init wrote repository: %v", err)
+	}
+	if err := runner.Run(ctx, []string{"init", "--repo", "example/repo", "--source-hosts", "example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"add", url}); err != nil {
+		t.Fatal(err)
+	}
+	r, m, err := runner.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector := m.Packages[0].Path
+	manifest := mustRead(t, filepath.Join(dir, "packages.yaml"))
+	commands := [][]string{
+		{"add", "--dry-run", url},
+		{"source", "set", "--dry-run", selector, "https://example.com/moved.deb"},
+		{"remove", selector, "--dry-run"},
+		{"prune", "--apply", "--dry-run"},
+		{"sync", "--dry-run"},
+	}
+	for _, args := range commands {
+		if err := runner.Run(ctx, args); err != nil {
+			t.Errorf("%v: %v", args, err)
+		}
+		if !bytes.Equal(manifest, mustRead(t, filepath.Join(dir, "packages.yaml"))) {
+			t.Fatalf("%v changed manifest", args)
+		}
+	}
+	if err := runner.Run(ctx, []string{"replace", selector, url, "--dry-run"}); err == nil {
+		t.Fatal("dry replace accepted identical bytes")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "build")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry build wrote files: %v", err)
+	}
+	if _, err := contract.ReadManifest(filepath.Join(dir, "packages.yaml"), r); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f fixtureFetcher) Fetch(_ context.Context, raw string, _, _ []string) (io.ReadCloser, error) {
 	b, ok := f.data[raw]
 	if !ok {

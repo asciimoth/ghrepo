@@ -34,6 +34,12 @@ ghrepo --repo-dir /home/user/otherrepo add --upload ./myproject.deb
 
 Package file paths stay relative to the current directory. Repository files,
 cache, metadata, and Git operations use the selected repository directory.
+Use `--dry-run` with `init`, `add` (including `--upload`), `replace`, `sync`,
+`source set`, `remove`, `prune --apply`, `rebuild`, `check`, or `site-build` to
+preview the command without changing repository files or sending mutation
+requests. For example, `ghrepo add --upload --dry-run ./myproject.deb` checks
+the package file and reports the planned upload. `update` and `publish` also
+accept `--dry-run` as described below.
 `init --repo` still specifies the GitHub repository URL. `add` updates only
 `packages.yaml` and the ignored verified cache. `source set` verifies the new
 URL against the stored size and SHA-256 before it changes the manifest. `remove`
@@ -62,8 +68,9 @@ ghrepo update --dry-run
 ghrepo update
 ```
 
-`publish --dry-run` runs `sync`, `rebuild`, and `check`, then prints the exact
-Git path changes without committing or pushing. `publish` stages only the
+`publish --dry-run` runs `sync`, `rebuild`, and `check` in a temporary copy,
+then prints the exact Git path changes without changing repository files,
+committing, or pushing. `publish` stages only the
 configuration, templates, public keys, manifest, workflow, and signed metadata.
 It commits and pushes to `origin`. The ignored `.ghrepo-transaction/` directory
 records interrupted metadata swaps and is restored on the next `rebuild` or

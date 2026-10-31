@@ -43,8 +43,10 @@ func TestGitHubCommandsOffline(t *testing.T) {
 	bodies := map[string][]byte{}
 	var uploadedName, publicURL string
 	uploadCalls := 0
+	requestCalls := 0
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCalls++
 		if r.Header.Get("Authorization") != "Bearer test-secret" {
 			t.Error("missing token")
 		}
@@ -106,6 +108,12 @@ func TestGitHubCommandsOffline(t *testing.T) {
 	defer server.Close()
 	c := Runner{Dir: dir, GitHubAPIURL: server.URL, GitHubClient: server.Client(), Fetcher: githubFixtureFetcher{bodies: bodies}}
 	ctx := context.Background()
+	if err := c.Run(ctx, []string{"init", "--dry-run", "--repo", "https://github.com/example/repo", "--create-remote", "--configure-pages"}); err != nil {
+		t.Fatal(err)
+	}
+	if requestCalls != 0 {
+		t.Fatal("dry init sent a GitHub request")
+	}
 	if err := c.Run(ctx, []string{"init", "--repo", "https://github.com/example/repo", "--site", "https://example.github.io/repo", "--create-remote", "--configure-pages"}); err != nil {
 		t.Fatal(err)
 	}
@@ -136,6 +144,13 @@ func TestGitHubCommandsOffline(t *testing.T) {
 	}
 	t.Setenv("GHREPO_REPO_DIR", relativeRepo)
 	c.Dir = ""
+	beforeUpload := mustRead(t, filepath.Join(dir, "packages.yaml"))
+	if err := c.Run(ctx, []string{"add", "--upload", "--dry-run", "input.deb"}); err != nil {
+		t.Fatal(err)
+	}
+	if uploadCalls != 0 || !bytes.Equal(beforeUpload, mustRead(t, filepath.Join(dir, "packages.yaml"))) {
+		t.Fatal("dry upload changed remote or manifest")
+	}
 	if err := c.Run(ctx, []string{"add", "--upload", "input.deb"}); err != nil {
 		t.Fatal(err)
 	}

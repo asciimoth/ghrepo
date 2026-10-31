@@ -380,6 +380,14 @@ func (c Runner) publish(ctx context.Context, args []string) error {
 	if fs.NArg() != 0 {
 		return errors.New("usage: ghrepo publish [--dry-run] [--message TEXT]")
 	}
+	if *dry {
+		previewDir, err := copyPreviewRepository(c.root())
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(previewDir) }()
+		c.Dir = previewDir
+	}
 	if err := c.verifyIndexAllowlist(); err != nil {
 		return err
 	}
@@ -434,6 +442,99 @@ func (c Runner) publish(ctx context.Context, args []string) error {
 		return err
 	}
 	return nil
+}
+
+// copyPreviewRepository gives publish its own worktree and Git database.
+func copyPreviewRepository(root string) (string, error) {
+	previewDir, err := os.MkdirTemp("", "ghrepo-publish-*")
+	if err != nil {
+		return "", err
+	}
+	cleanup := func(err error) (string, error) {
+		_ = os.RemoveAll(previewDir)
+		return "", err
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return cleanup(err)
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return cleanup(err)
+	}
+	if rel, err := filepath.Rel(root, previewDir); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return cleanup(errors.New("preview directory must be outside the repository"))
+	}
+	git, err := os.Lstat(filepath.Join(root, ".git"))
+	if err != nil {
+		return cleanup(err)
+	}
+	if !git.IsDir() {
+		return cleanup(errors.New("publish dry run requires a local .git directory"))
+	}
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		destination := filepath.Join(previewDir, rel)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return os.Mkdir(destination, info.Mode().Perm())
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			target := link
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(path), target)
+			}
+			target, err = filepath.EvalSymlinks(target)
+			if err != nil {
+				return err
+			}
+			relTarget, err := filepath.Rel(root, target)
+			if err != nil || relTarget == ".." || strings.HasPrefix(relTarget, ".."+string(filepath.Separator)) {
+				return fmt.Errorf("preview symlink points outside repository: %s", rel)
+			}
+			if filepath.IsAbs(link) {
+				link = filepath.Join(previewDir, relTarget)
+			}
+			return os.Symlink(link, destination)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("publish dry run cannot copy non-regular file: %s", rel)
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = in.Close() }()
+		out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(out, in)
+		if closeErr := out.Close(); err == nil {
+			err = closeErr
+		}
+		return err
+	})
+	if err != nil {
+		return cleanup(err)
+	}
+	return previewDir, nil
 }
 
 func (c Runner) git(args ...string) error {

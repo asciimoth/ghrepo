@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -76,6 +77,17 @@ func TestRebuildCheckDryRunAndPublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := mustRead(t, filepath.Join(dir, "deb", "InRelease"))
+	for _, args := range [][]string{{"rebuild", "--dry-run"}, {"check", "--dry-run"}, {"site-build", "--dry-run"}} {
+		if err := runner.Run(ctx, args); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if !bytes.Equal(before, mustRead(t, filepath.Join(dir, "deb", "InRelease"))) {
+			t.Fatalf("%v changed signed metadata", args)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "build", "site")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry site-build changed repository: %v", err)
+	}
 	// A bad source leaves the signed files intact.
 	r, m, err := runner.load()
 	if err != nil {
@@ -113,6 +125,12 @@ func TestRebuildCheckDryRunAndPublish(t *testing.T) {
 	if err := runner.Run(ctx, []string{"publish", "--dry-run"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "local-cache", "sha256", m.Packages[0].SHA256)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry publish changed cache: %v", err)
+	}
+	if !bytes.Equal(before, mustRead(t, filepath.Join(dir, "deb", "InRelease"))) {
+		t.Fatal("dry publish changed signed metadata")
+	}
 	text := output.String()
 	if !strings.Contains(text, "packages.yaml") || !strings.Contains(text, "deb/InRelease") || strings.Contains(text, ".env") || strings.Contains(text, "local-cache") {
 		t.Fatalf("wrong dry-run: %s", text)
@@ -135,6 +153,36 @@ func TestRebuildCheckDryRunAndPublish(t *testing.T) {
 	}
 	if len(strings.Split(strings.TrimSpace(text), "\n")) != len(strings.Split(strings.TrimSpace(string(staged)), "\n")) {
 		t.Fatalf("dry-run path count differs from commit: %s", text)
+	}
+}
+
+func TestCopyPreviewRepositoryKeepsSymlinksInsideCopy(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "template.txt"), []byte("before"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("template.txt", filepath.Join(root, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := copyPreviewRepository(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(preview) }()
+	if err := os.WriteFile(filepath.Join(preview, "link.txt"), []byte("after"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if string(mustRead(t, filepath.Join(root, "template.txt"))) != "before" {
+		t.Fatal("preview symlink changed source")
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "outside"), filepath.Join(root, "outside-link")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := copyPreviewRepository(root); err == nil {
+		t.Fatal("accepted symlink outside repository")
 	}
 }
 func TestRecoverInterruptedMetadataSwap(t *testing.T) {

@@ -97,6 +97,28 @@ func (c Runner) addUpload(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if c.dryRun {
+		for _, file := range fs.Args() {
+			info, err := os.Lstat(file)
+			if err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > r.Downloads.MaxBytes {
+				return errors.New("invalid upload file")
+			}
+			meta, _, _, err := inspect.File(file, r.Downloads.MaxBytes)
+			if err != nil {
+				return err
+			}
+			if *sign && meta.Format != "rpm" {
+				return errors.New("--sign-rpm requires RPM files")
+			}
+			if err := c.preview("would upload %s", file); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	for _, file := range fs.Args() {
 		if err := c.uploadOne(ctx, file, *sign, g, r, local, &m); err != nil {
 			return err

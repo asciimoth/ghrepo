@@ -31,6 +31,7 @@ type Runner struct {
 	Now          func() time.Time
 	GitHubAPIURL string
 	GitHubClient *http.Client
+	dryRun       bool
 }
 
 func (c Runner) root() string {
@@ -54,6 +55,12 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 	c, args, err = c.repositoryDir(args)
 	if err != nil {
 		return err
+	}
+	if len(args) == 0 {
+		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build")
+	}
+	if args[0] != "update" && args[0] != "publish" {
+		args = c.extractDryRun(args)
 	}
 	if len(args) == 0 {
 		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build")
@@ -82,10 +89,16 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		if len(args) != 1 {
 			return errors.New("usage: ghrepo rebuild")
 		}
+		if c.dryRun {
+			return c.previewBuild(ctx, "rebuild")
+		}
 		return c.rebuild(ctx)
 	case "check":
 		if len(args) != 1 {
 			return errors.New("usage: ghrepo check")
+		}
+		if c.dryRun {
+			return c.previewBuild(ctx, "check")
 		}
 		return c.check(ctx)
 	case "publish":
@@ -96,10 +109,51 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		if len(args) != 1 {
 			return errors.New("usage: ghrepo site-build")
 		}
+		if c.dryRun {
+			return c.previewBuild(ctx, "site-build")
+		}
 		return site.Build(ctx, c.root(), filepath.Join(c.root(), "build", "site"), c.Fetcher)
 	default:
 		return errors.New("unknown command")
 	}
+}
+
+func (c *Runner) extractDryRun(args []string) []string {
+	filtered := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == "--dry-run" {
+			c.dryRun = true
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	return filtered
+}
+
+func (c Runner) preview(format string, args ...any) error {
+	_, err := fmt.Fprintf(c.output(), format+"\n", args...)
+	return err
+}
+
+func (c Runner) previewBuild(ctx context.Context, name string) error {
+	previewDir, err := copyPreviewRepository(c.root())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(previewDir) }()
+	c.Dir = previewDir
+	switch name {
+	case "rebuild":
+		err = c.rebuild(ctx)
+	case "check":
+		err = c.check(ctx)
+	case "site-build":
+		err = site.Build(ctx, c.root(), filepath.Join(c.root(), "build", "site"), c.Fetcher)
+	}
+	if err != nil {
+		return err
+	}
+	return c.preview("would %s repository data", name)
 }
 
 func (c Runner) repositoryDir(args []string) (Runner, []string, error) {
@@ -252,6 +306,9 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	}
 	if err := r.Validate(); err != nil {
 		return err
+	}
+	if c.dryRun {
+		return c.preview("would initialize repository in %s (remote creation: %t, Pages configuration: %t)", dir, *createRemote, *configurePages)
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -457,6 +514,34 @@ func (c Runner) add(ctx context.Context, args []string) error {
 	if args[0] == "--upload" || args[0] == "--sign-rpm" {
 		return c.addUpload(ctx, args)
 	}
+	if c.dryRun {
+		r, m, err := c.load()
+		if err != nil {
+			return err
+		}
+		dir, err := os.MkdirTemp("", "ghrepo-add-*")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(dir) }()
+		fetcher := c.Fetcher
+		if fetcher == nil {
+			fetcher = cache.HTTPFetcher{}
+		}
+		for _, raw := range args {
+			before := len(m.Packages)
+			if err := addOne(ctx, raw, dir, r, &m, fetcher, -1, time.Time{}); err != nil {
+				return err
+			}
+			if len(m.Packages) == before {
+				continue
+			}
+			if err := c.preview("would add %s from %s", m.Packages[before].Path, raw); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	r, m, err := c.load()
 	if err != nil {
 		return err
@@ -578,6 +663,16 @@ func (c Runner) sync(ctx context.Context, args []string) error {
 		return err
 	}
 	_, _, root := c.paths()
+	if c.dryRun {
+		for _, p := range m.Packages {
+			if cache.VerifyFile(filepath.Join(root, "sha256", p.SHA256), p) != nil {
+				if err := c.preview("would download %s", p.URL); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
 	for _, p := range m.Packages {
 		if _, err := cache.Ensure(ctx, root, r, p, c.Fetcher); err != nil {
 			return err
@@ -603,6 +698,18 @@ func (c Runner) sourceSet(ctx context.Context, args []string) error {
 	if m.Packages[i].URL == args[1] {
 		return nil
 	}
+	if c.dryRun {
+		m.Packages[i].URL = args[1]
+		root, err := os.MkdirTemp("", "ghrepo-source-*")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(root) }()
+		if _, err := cache.FetchVerified(ctx, root, r, m.Packages[i], c.Fetcher); err != nil {
+			return err
+		}
+		return c.preview("would set source of %s to %s", m.Packages[i].Path, args[1])
+	}
 	m.Packages[i].URL = args[1]
 	_, _, root := c.paths()
 	if _, err := cache.FetchVerified(ctx, root, r, m.Packages[i], c.Fetcher); err != nil {
@@ -619,6 +726,7 @@ func (c Runner) remove(args []string) error {
 		return err
 	}
 	seen := map[int]bool{}
+	selected := make([]int, 0, len(args))
 	for _, s := range args {
 		i, err := selectOne(m, s)
 		if err != nil {
@@ -628,8 +736,20 @@ func (c Runner) remove(args []string) error {
 			return errors.New("duplicate selector")
 		}
 		seen[i] = true
+		selected = append(selected, i)
 	}
-	for i := range seen {
+	if c.dryRun {
+		for _, i := range selected {
+			if m.Packages[i].State != "active" {
+				continue
+			}
+			if err := c.preview("would retain %s", m.Packages[i].Path); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, i := range selected {
 		if m.Packages[i].State == "active" {
 			m.Packages[i].State = "retained"
 			m.Packages[i].RetainedAt = c.now().Format(time.RFC3339)

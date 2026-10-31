@@ -35,8 +35,16 @@ func (c Runner) replacePackage(ctx context.Context, args []string) error {
 	}
 	_, _, root := c.paths()
 	dir := filepath.Join(root, "sha256")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
+	if c.dryRun {
+		dir, err = os.MkdirTemp("", "ghrepo-replace-*")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(dir) }()
+	} else {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return err
+		}
 	}
 	fetcher := c.Fetcher
 	if fetcher == nil {
@@ -54,6 +62,9 @@ func (c Runner) replacePackage(ctx context.Context, args []string) error {
 		if err := rpm.VerifyPackageSignature(filepath.Join(dir, newPackage.SHA256), keys, r.RPM.PackageSignature); err != nil {
 			return err
 		}
+	}
+	if c.dryRun {
+		return c.preview("would replace %s with %s from %s", m.Packages[i].Path, newPackage.Path, args[1])
 	}
 	return c.save(m, r)
 }
@@ -92,7 +103,7 @@ func (c Runner) prune(args []string) error {
 			if _, err := fmt.Fprintf(c.output(), "eligible %s\n", p.Path); err != nil {
 				return err
 			}
-			if *apply {
+			if *apply && !c.dryRun {
 				changed = true
 				continue
 			}
