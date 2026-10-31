@@ -1,0 +1,211 @@
+package cmd
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/asciimoth/ghrepo/contract"
+)
+
+type fixtureFetcher struct{ data map[string][]byte }
+
+func (f fixtureFetcher) Fetch(_ context.Context, raw string, _, _ []string) (io.ReadCloser, error) {
+	b, ok := f.data[raw]
+	if !ok {
+		return nil, errors.New("missing fixture")
+	}
+	return io.NopCloser(bytes.NewReader(b)), nil
+}
+func TestLocalCommands(t *testing.T) {
+	data, err := os.ReadFile("../contract/testdata/packages/hello_1.2.0-1_amd64.deb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	original := "https://example.com/a.deb"
+	moved := "https://example.com/b.deb"
+	runner := Runner{Dir: dir, Fetcher: fixtureFetcher{map[string][]byte{original: data, moved: data}}, Now: func() time.Time { return time.Date(2026, 10, 31, 1, 2, 3, 0, time.UTC) }}
+	ctx := context.Background()
+	if err := runner.Run(ctx, []string{"init", "--repo", "https://github.com/example/repo", "--site", "https://example.github.io/repo", "--source-hosts", "example.com", "--redirect-hosts", ""}); err != nil {
+		t.Fatal(err)
+	}
+	ignore := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(ignore, append([]byte("custom\n"), mustRead(t, ignore)...), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"init"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(mustRead(t, ignore)), "custom\n") {
+		t.Fatal("init removed existing ignore rules")
+	}
+	workflow := string(mustRead(t, filepath.Join(dir, ".github", "workflows", "pages.yml")))
+	if !strings.Contains(workflow, "path: build/site") {
+		t.Fatal("workflow does not limit the Pages artifact to build/site")
+	}
+	if err := runner.Run(ctx, []string{"add", original}); err != nil {
+		t.Fatal(err)
+	}
+	rp := filepath.Join(dir, "ghrepo.yaml")
+	mp := filepath.Join(dir, "packages.yaml")
+	r, err := contract.ReadRepository(rp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := contract.ReadManifest(mp, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Packages) != 1 {
+		t.Fatal(m)
+	}
+	p := m.Packages[0]
+	if p.Identity.Name != "hello" || p.Identity.Version != "1.2.0-1" || p.Identity.Architecture != "amd64" || !strings.HasPrefix(p.Path, "deb/pool/hello_1.2.0-1_amd64_") {
+		t.Fatal(p)
+	}
+	before := mustRead(t, mp)
+	if err := runner.Run(ctx, []string{"add", original}); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, mustRead(t, mp)) {
+		t.Fatal("repeat add changed manifest")
+	}
+	if err := runner.Run(ctx, []string{"source", "set", p.Path, moved}); err != nil {
+		t.Fatal(err)
+	}
+	m, err = contract.ReadManifest(mp, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Packages[0].Path != p.Path || m.Packages[0].SHA256 != p.SHA256 || m.Packages[0].URL != moved {
+		t.Fatal(m)
+	}
+	if err := runner.Run(ctx, []string{"sync"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"remove", "deb/hello/amd64/1.2.0-1"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err = contract.ReadManifest(mp, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Packages[0].State != "retained" || m.Packages[0].RetainedAt != "2026-10-31T01:02:03Z" {
+		t.Fatal(m)
+	}
+}
+func TestSourceMoveRejectsChangedBytes(t *testing.T) {
+	data := mustRead(t, "../contract/testdata/packages/hello_1.2.0-1_amd64.deb")
+	changed := append([]byte(nil), data...)
+	changed[len(changed)-1] ^= 1
+	dir := t.TempDir()
+	a := "https://example.com/a"
+	b := "https://example.com/b"
+	runner := Runner{Dir: dir, Fetcher: fixtureFetcher{map[string][]byte{a: data, b: changed}}}
+	ctx := context.Background()
+	if err := runner.Run(ctx, []string{"init", "--repo", "https://github.com/example/repo", "--site", "https://example.github.io/repo", "--source-hosts", "example.com", "--redirect-hosts", ""}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"add", a}); err != nil {
+		t.Fatal(err)
+	}
+	mp := filepath.Join(dir, "packages.yaml")
+	before := mustRead(t, mp)
+	if err := runner.Run(ctx, []string{"source", "set", "deb/hello/amd64/1.2.0-1", b}); err == nil {
+		t.Fatal("accepted changed source")
+	}
+	if !bytes.Equal(before, mustRead(t, mp)) {
+		t.Fatal("failed move changed manifest")
+	}
+}
+
+func TestAddBatchFailurePreservesManifestAndCleansTemporaryFiles(t *testing.T) {
+	data := mustRead(t, "../contract/testdata/packages/hello_1.2.0-1_amd64.deb")
+	dir := t.TempDir()
+	a := "https://example.com/a"
+	b := "https://example.com/missing"
+	runner := Runner{Dir: dir, Fetcher: fixtureFetcher{map[string][]byte{a: data}}}
+	ctx := context.Background()
+	if err := runner.Run(ctx, []string{"init", "--repo", "https://github.com/example/repo", "--site", "https://example.github.io/repo", "--source-hosts", "example.com", "--redirect-hosts", ""}); err != nil {
+		t.Fatal(err)
+	}
+	mp := filepath.Join(dir, "packages.yaml")
+	before := mustRead(t, mp)
+	if err := runner.Run(ctx, []string{"add", a, b}); err == nil {
+		t.Fatal("accepted incomplete batch")
+	}
+	if !bytes.Equal(before, mustRead(t, mp)) {
+		t.Fatal("failed batch changed manifest")
+	}
+	temps, err := filepath.Glob(filepath.Join(dir, "local-cache", "sha256", ".add-*"))
+	if err != nil || len(temps) != 0 {
+		t.Fatalf("temporary files remain: %v, %v", temps, err)
+	}
+}
+
+func TestAddRejectsDuplicateIdentityWithDifferentBytes(t *testing.T) {
+	a := "https://example.com/a"
+	b := "https://example.com/b"
+	runner := Runner{Dir: t.TempDir(), Fetcher: fixtureFetcher{map[string][]byte{
+		a: mustRead(t, "../contract/testdata/packages/hello_1.2.0-1_amd64.deb"),
+		b: mustRead(t, "../contract/testdata/packages/hello_changed.deb"),
+	}}}
+	ctx := context.Background()
+	if err := runner.Run(ctx, []string{"init", "--repo", "https://github.com/example/repo", "--site", "https://example.github.io/repo", "--source-hosts", "example.com", "--redirect-hosts", ""}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"add", a}); err != nil {
+		t.Fatal(err)
+	}
+	mp := filepath.Join(runner.Dir, "packages.yaml")
+	before := mustRead(t, mp)
+	if err := runner.Run(ctx, []string{"add", b}); err == nil || !strings.Contains(err.Error(), "different bytes") {
+		t.Fatalf("expected identity conflict, got %v", err)
+	}
+	if !bytes.Equal(before, mustRead(t, mp)) {
+		t.Fatal("identity conflict changed manifest")
+	}
+}
+
+func TestInitExportsConfiguredPublicKeyWithoutReplacingIt(t *testing.T) {
+	tools := t.TempDir()
+	program := filepath.Join(tools, "gpg")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\nprintf public-key-bytes\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+	dir := t.TempDir()
+	runner := Runner{Dir: dir}
+	ctx := context.Background()
+	if err := runner.Run(ctx, []string{"init", "--repo", "https://github.com/example/repo", "--site", "https://example.github.io/repo", "--key-id", "TESTKEY"}); err != nil {
+		t.Fatal(err)
+	}
+	key := filepath.Join(dir, "KEY.gpg")
+	if string(mustRead(t, key)) != "public-key-bytes" {
+		t.Fatal("public key was not exported")
+	}
+	if err := os.WriteFile(key, []byte("existing-key"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"init"}); err != nil {
+		t.Fatal(err)
+	}
+	if string(mustRead(t, key)) != "existing-key" {
+		t.Fatal("repeat init replaced public key")
+	}
+}
+func mustRead(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
