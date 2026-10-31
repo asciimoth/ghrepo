@@ -237,6 +237,25 @@ Run this option in a disposable root or user namespace environment. Neither tool
 is a normal host requirement. APT compatibility is checked by the local HTTP
 test where a working APT client is available.
 
+## Site artifact
+
+`ghrepo site-build` reads only `ghrepo.yaml`, `packages.yaml`, `KEY.gpg`, signed
+APT and RPM metadata, trusted public RPM keys, and committed files under
+`templates/`. It downloads every active and retained package from its manifest
+URL and checks size and SHA-256 again. The artifact contains only those package
+paths, `KEY.gpg`, the four APT metadata files, RPM metadata with checksum-named
+files, configured trusted public keys, and rendered `index.html`, `README.md`,
+`setup.sh`, `deb.list`, `rpm.repo`, and optional `CNAME`. RPM metadata files kept
+for client retention must match the checksum in their filenames. The current
+RPM indexes are also verified against signed `repomd.xml`.
+
+`init` installs the five source templates without replacing customized files.
+The builder renders present templates into the artifact and requires
+`templates/index.html`. The generated `rpm.repo` sets `repo_gpgcheck=1` and
+sets `gpgcheck` from `rpm.package_signature`. The builder uses `gpgv` with the
+committed public key. It does not read local configuration or signing keys.
+Only a complete, verified site replaces `build/site/`.
+
 ## Fixture source and license
 
 `contract/testdata/generate/main.go` deterministically creates the four DEB

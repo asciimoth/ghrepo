@@ -209,6 +209,9 @@ func TestSignCopy(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(site, p.Path), mustRead(t, signed), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(site, "KEY.gpg"), mustRead(t, pub), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := Verify(out, pub, site, r, m); err != nil {
 		t.Fatal(err)
 	}

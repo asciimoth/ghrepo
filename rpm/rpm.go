@@ -528,7 +528,11 @@ func Verify(dir, publicKey, packageRoot string, r contract.Repository, m contrac
 			if err := cache.VerifyFile(name, p); err != nil {
 				return err
 			}
-			if err := VerifyPackageSignature(name, r.RPM.TrustedKeyPaths, r.RPM.PackageSignature); err != nil {
+			keys := make([]string, len(r.RPM.TrustedKeyPaths))
+			for i, key := range r.RPM.TrustedKeyPaths {
+				keys[i] = filepath.Join(packageRoot, filepath.FromSlash(key))
+			}
+			if err := VerifyPackageSignature(name, keys, r.RPM.PackageSignature); err != nil {
 				return err
 			}
 		}

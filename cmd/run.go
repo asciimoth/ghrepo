@@ -18,6 +18,7 @@ import (
 	"github.com/asciimoth/ghrepo/cache"
 	"github.com/asciimoth/ghrepo/contract"
 	"github.com/asciimoth/ghrepo/inspect"
+	"github.com/asciimoth/ghrepo/site"
 )
 
 type Runner struct {
@@ -44,7 +45,7 @@ func (c Runner) paths() (string, string, string) {
 }
 func (c Runner) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: ghrepo init|add|sync|source set|remove")
+		return errors.New("usage: ghrepo init|add|sync|source set|remove|site-build")
 	}
 	switch args[0] {
 	case "init":
@@ -60,6 +61,11 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		return errors.New("usage: ghrepo source set SELECTOR URL")
 	case "remove":
 		return c.remove(args[1:])
+	case "site-build":
+		if len(args) != 1 {
+			return errors.New("usage: ghrepo site-build")
+		}
+		return site.Build(ctx, c.root(), filepath.Join(c.root(), "build", "site"), c.Fetcher)
 	default:
 		return errors.New("unknown command")
 	}
@@ -81,7 +87,7 @@ func (c Runner) init(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	repo := fs.String("repo", "", "public repository HTTPS URL")
-	site := fs.String("site", "", "site HTTPS base URL")
+	siteURL := fs.String("site", "", "site HTTPS base URL")
 	branch := fs.String("branch", "main", "")
 	sourceHosts := fs.String("source-hosts", "github.com", "")
 	redirectHosts := fs.String("redirect-hosts", "release-assets.githubusercontent.com", "")
@@ -109,10 +115,10 @@ func (c Runner) init(args []string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	} else {
-		if *repo == "" || *site == "" {
+		if *repo == "" || *siteURL == "" {
 			return errors.New("init requires --repo and --site")
 		}
-		r = contract.Repository{Schema: 1, Repository: contract.Repo{URL: *repo, Branch: *branch, Layout: "flat-v1"}, APT: contract.APT{Suite: "stable", Component: "main", Architectures: []string{"amd64", "arm64"}}, RPM: contract.RPM{ID: "ghrepo", Name: "Packages", Architectures: []string{"x86_64", "aarch64"}, PackageSignature: "metadata-only"}, Downloads: contract.Download{SourceHosts: splitList(*sourceHosts), RedirectHosts: splitList(*redirectHosts), MaxBytes: 2147483647}, Site: contract.Site{BaseURL: *site, MaxBytes: 1073741824, RetentionDays: 30}, Storage: contract.Storage{Backend: "none"}}
+		r = contract.Repository{Schema: 1, Repository: contract.Repo{URL: *repo, Branch: *branch, Layout: "flat-v1"}, APT: contract.APT{Suite: "stable", Component: "main", Architectures: []string{"amd64", "arm64"}}, RPM: contract.RPM{ID: "ghrepo", Name: "Packages", Architectures: []string{"x86_64", "aarch64"}, PackageSignature: "metadata-only"}, Downloads: contract.Download{SourceHosts: splitList(*sourceHosts), RedirectHosts: splitList(*redirectHosts), MaxBytes: 2147483647}, Site: contract.Site{BaseURL: *siteURL, MaxBytes: 1073741824, RetentionDays: 30}, Storage: contract.Storage{Backend: "none"}}
 	}
 	if err := r.Validate(); err != nil {
 		return err
@@ -156,10 +162,12 @@ func (c Runner) init(args []string) error {
 	if err := os.MkdirAll(filepath.Join(dir, "templates"), 0755); err != nil {
 		return err
 	}
-	if err := createIfAbsent(filepath.Join(dir, "templates", "index.html"), func() ([]byte, error) {
-		return []byte("<!doctype html><title>Packages</title><h1>Packages</h1>\n"), nil
-	}, 0644); err != nil {
-		return err
+	for _, item := range site.DefaultTemplates {
+		if err := createIfAbsent(filepath.Join(dir, "templates", item.Name), func() ([]byte, error) {
+			return []byte(item.Text), nil
+		}, 0644); err != nil {
+			return err
+		}
 	}
 	if err := os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0755); err != nil {
 		return err
