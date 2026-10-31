@@ -1,3 +1,3 @@
 # ghrepo
 
-Tool for hosting deb/rm repos on GH pages
+Tool for hosting DEB and RPM repositories on GitHub Pages.
