@@ -172,6 +172,11 @@ func gzipData(data []byte) ([]byte, error) {
 
 // Build writes a complete signed rpm directory in a new output path.
 func Build(out, cacheRoot string, r contract.Repository, m contract.Manifest, local contract.Local) (buildErr error) {
+	return BuildWithKeyRoot(out, cacheRoot, ".", r, m, local)
+}
+
+// BuildWithKeyRoot resolves trusted package key paths from the checkout root.
+func BuildWithKeyRoot(out, cacheRoot, keyRoot string, r contract.Repository, m contract.Manifest, local contract.Local) (buildErr error) {
 	if err := m.Validate(r); err != nil {
 		return err
 	}
@@ -208,7 +213,11 @@ func Build(out, cacheRoot string, r contract.Repository, m contract.Manifest, lo
 		if meta.Format != "rpm" || meta.Identity != p.Identity || n != p.Size || digest != p.SHA256 {
 			return fmt.Errorf("package %s: inspected identity differs", p.Path)
 		}
-		if err := VerifyPackageSignature(name, r.RPM.TrustedKeyPaths, r.RPM.PackageSignature); err != nil {
+		keys := make([]string, len(r.RPM.TrustedKeyPaths))
+		for i, key := range r.RPM.TrustedKeyPaths {
+			keys[i] = filepath.Join(keyRoot, filepath.FromSlash(key))
+		}
+		if err := VerifyPackageSignature(name, keys, r.RPM.PackageSignature); err != nil {
 			return fmt.Errorf("package %s: %w", p.Path, err)
 		}
 		raw, err := os.ReadFile(name)

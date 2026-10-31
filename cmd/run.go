@@ -22,6 +22,7 @@ import (
 )
 
 type Runner struct {
+	Out     io.Writer
 	Dir     string
 	Fetcher cache.Fetcher
 	Now     func() time.Time
@@ -45,7 +46,7 @@ func (c Runner) paths() (string, string, string) {
 }
 func (c Runner) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: ghrepo init|add|sync|source set|remove|site-build")
+		return errors.New("usage: ghrepo init|add|sync|source set|remove|rebuild|check|publish|site-build")
 	}
 	switch args[0] {
 	case "init":
@@ -61,6 +62,18 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		return errors.New("usage: ghrepo source set SELECTOR URL")
 	case "remove":
 		return c.remove(args[1:])
+	case "rebuild":
+		if len(args) != 1 {
+			return errors.New("usage: ghrepo rebuild")
+		}
+		return c.rebuild(ctx)
+	case "check":
+		if len(args) != 1 {
+			return errors.New("usage: ghrepo check")
+		}
+		return c.check(ctx)
+	case "publish":
+		return c.publish(ctx, args[1:])
 	case "site-build":
 		if len(args) != 1 {
 			return errors.New("usage: ghrepo site-build")
@@ -173,7 +186,7 @@ func (c Runner) init(args []string) error {
 		return err
 	}
 	if err := createIfAbsent(filepath.Join(dir, ".github", "workflows", "pages.yml"), func() ([]byte, error) {
-		return []byte(strings.Replace(workflow, "branches: [main]", "branches: ["+r.Repository.Branch+"]", 1)), nil
+		return []byte(workflowFor(r)), nil
 	}, 0644); err != nil {
 		return err
 	}
@@ -263,7 +276,7 @@ func appendIgnore(name string) error {
 		return err
 	}
 	text := string(existing)
-	for _, entry := range []string{".ghrepo.local.yaml", ".env", "local-cache/", "build/"} {
+	for _, entry := range []string{".ghrepo.local.yaml", ".env", "local-cache/", "build/", ".ghrepo-transaction/"} {
 		found := false
 		for _, line := range strings.Split(text, "\n") {
 			if line == entry {
@@ -458,4 +471,18 @@ func selectOne(m contract.Manifest, s string) (int, error) {
 	return index, nil
 }
 
-var workflow = "name: Pages\non:\n  push:\n    branches: [main]\n  workflow_dispatch:\npermissions:\n  contents: read\n  pages: write\n  id-token: write\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-go@v5\n        with:\n          go-version-file: go.mod\n      - run: go run . site-build\n      - uses: actions/upload-pages-artifact@v3\n        with:\n          path: build/site\n  deploy:\n    needs: build\n    runs-on: ubuntu-latest\n    environment: github-pages\n    steps:\n      - uses: actions/deploy-pages@v4\n"
+func workflowFor(r contract.Repository) string {
+	return "name: Pages\n" +
+		"on:\n  push:\n    branches: [\"" + r.Repository.Branch + "\"]\n  workflow_dispatch:\n" +
+		"concurrency:\n  group: pages-" + r.Repository.Branch + "\n  cancel-in-progress: false\n" +
+		"permissions:\n  contents: read\n" +
+		"jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n" +
+		"      - uses: actions/checkout@v4\n" +
+		"      - uses: actions/setup-go@v5\n        with:\n          go-version: '1.25.5'\n" +
+		"      - run: go run github.com/asciimoth/ghrepo@main site-build\n" +
+		"      - uses: actions/upload-pages-artifact@v3\n        with:\n          path: build/site\n" +
+		"  deploy:\n    needs: build\n    runs-on: ubuntu-latest\n" +
+		"    environment:\n      name: github-pages\n      url: ${{ steps.deployment.outputs.page_url }}\n" +
+		"    permissions:\n      pages: write\n      id-token: write\n" +
+		"    steps:\n      - id: deployment\n        uses: actions/deploy-pages@v4\n"
+}

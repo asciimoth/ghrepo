@@ -245,16 +245,16 @@ APT and RPM metadata, trusted public RPM keys, and committed files under
 URL and checks size and SHA-256 again. The artifact contains only those package
 paths, `KEY.gpg`, the four APT metadata files, RPM metadata with checksum-named
 files, configured trusted public keys, and rendered `index.html`, `README.md`,
-`setup.sh`, `deb.list`, `rpm.repo`, and optional `CNAME`. RPM metadata files kept
-for client retention must match the checksum in their filenames. The current
-RPM indexes are also verified against signed `repomd.xml`.
+`setup.sh`, `deb.list`, `rpm.repo`, and optional `CNAME`. RPM metadata files
+kept for client retention must match the checksum in their filenames. The
+current RPM indexes are also verified against signed `repomd.xml`.
 
 `init` installs the five source templates without replacing customized files.
 The builder renders present templates into the artifact and requires
-`templates/index.html`. The generated `rpm.repo` sets `repo_gpgcheck=1` and
-sets `gpgcheck` from `rpm.package_signature`. The builder uses `gpgv` with the
-committed public key. It does not read local configuration or signing keys.
-Only a complete, verified site replaces `build/site/`.
+`templates/index.html`. The generated `rpm.repo` sets `repo_gpgcheck=1` and sets
+`gpgcheck` from `rpm.package_signature`. The builder uses `gpgv` with the
+committed public key. It does not read local configuration or signing keys. Only
+a complete, verified site replaces `build/site/`.
 
 ## Fixture source and license
 
@@ -270,3 +270,28 @@ hashes. `contract/testdata/cases.json` records the expected positive and
 negative cases. `invalid-signature.asc` is intentionally invalid test data, not
 a key or usable signature. Normal tests only read local files and do not use the
 network.
+
+## Local publishing transaction
+
+`rebuild` reads one validated manifest snapshot, verifies cached package bytes,
+creates both signed metadata trees in `.ghrepo-transaction/`, and verifies them
+with the committed public key. It copies checksum-named RPM metadata from the
+prior tree for client retention. A `pending.json` record precedes the two
+directory renames. The next `rebuild` or `check` restores both prior trees if
+the swap was interrupted. A completed swap has a `complete` marker and only
+needs transaction cleanup.
+
+`check` fetches each manifest source again, verifies the APT and RPM signatures
+and index links, and builds a temporary site to check the exact artifact size.
+`publish --dry-run` runs `sync`, `rebuild`, and `check`, then stages the
+explicit allowlist in a temporary Git index and reports the planned commit
+paths. `publish` checks that its staged tree matches this preview before it
+commits and pushes `HEAD` to `origin`. It rejects an index that already has a
+staged path outside the allowlist. The allowlist contains shared configuration,
+`packages.yaml`, public keys, the Pages workflow, the five named templates, and
+generated signed metadata. It excludes local settings, `.env`, cache,
+transaction records, and build output even when ignore rules change.
+
+The generated Pages workflow runs the tool module from its `main` branch. Its
+build job uploads only `build/site/`. Its deploy job uses the `github-pages`
+environment and grants `pages: write` and `id-token: write` permissions.
