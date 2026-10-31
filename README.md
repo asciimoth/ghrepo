@@ -104,6 +104,61 @@ failed build keeps the previous `build/site/` directory. The artifact also
 contains the rendered landing page, setup notes, download script, and APT and
 RPM client files from the committed templates.
 
+## Packages page and setup notes
+
+`ghrepo init` creates `templates/index.html` and `templates/README.md`. The
+first file becomes the site's `index.html` packages page. By default, it links
+to `deb.list`, `rpm.repo`, and `README.md`, then lists active packages with
+their names, versions, architectures, and download links. The second file
+becomes the site's `README.md` setup notes. By default, it gives the APT and RPM
+source URLs, links to `KEY.gpg` and the client configuration files, shows the
+APT keyring path, and lists active package downloads.
+
+Edit these source files to change the text, HTML, Markdown, links, or package
+layout. `init` does not overwrite edited templates. The site builder reads the
+source templates on each build. Run `ghrepo check` to check the rendered site,
+then `ghrepo publish` to commit and deploy your changes.
+
+Both files use Go template expressions in `{{` and `}}`. The available data is:
+
+| Expression    | Value                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------ |
+| `.BaseURL`    | `site.base_url` from `ghrepo.yaml`, without a trailing slash.                              |
+| `.Repository` | The validated `ghrepo.yaml` data, such as `.Repository.RPM.ID` and `.Repository.RPM.Name`. |
+| `.Packages`   | All entries from `packages.yaml`, including active and retained packages.                  |
+| `.GPGCheck`   | `1` for `trusted-packages`; `0` for `metadata-only`.                                       |
+| `.RPMKeyURLs` | Space-separated public URLs for the repository key and trusted RPM keys.                   |
+
+Each item in `.Packages` has `.State`, `.Path`, `.Format`, `.Identity`, and the
+other fields defined in `packages.yaml`. For example, `.Identity.Name`,
+`.Identity.Version`, and `.Identity.Architecture` identify a package. Filter on
+`.State` if a list must contain only active packages. Use `$.BaseURL` inside a
+`range` to refer to the site URL; `.` then refers to the current package.
+
+For example, this HTML in `templates/index.html` makes a list of active DEB
+packages:
+
+```html
+<h1>{{.Repository.RPM.Name}}</h1>
+<ul>
+{{range .Packages}}{{if and (eq .State "active") (eq .Format "deb")}}
+  <li><a href="{{$.BaseURL}}/{{.Path}}">{{.Identity.Name}} {{.Identity.Version}}</a></li>
+{{end}}{{end}}
+</ul>
+```
+
+`index.html` uses Go's `html/template`, which escapes package values for HTML.
+`README.md` uses `text/template` and produces a Markdown file. For example, this
+line in `templates/README.md` links to the public key:
+
+```markdown
+Download [the repository key]({{.BaseURL}}/KEY.gpg).
+```
+
+The builder requires `templates/index.html`. It omits the rendered `README.md`
+if `templates/README.md` is absent. Template parse errors or unknown fields fail
+the site build.
+
 ## Docker compatibility tests
 
 Run `just test-e2e` with Docker available. The test builds Linux test binaries
