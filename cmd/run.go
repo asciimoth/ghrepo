@@ -138,7 +138,7 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	repo := fs.String("repo", "", "GitHub repository as user/repo or HTTPS URL")
-	siteURL := fs.String("site", "", "site HTTPS base URL (defaults to GitHub Pages)")
+	siteURL := fs.String("site", "", "site HTTPS base URL (updates existing repositories)")
 	branch := fs.String("branch", "main", "")
 	sourceHosts := fs.String("source-hosts", "github.com", "")
 	redirectHosts := fs.String("redirect-hosts", "release-assets.githubusercontent.com,objects.githubusercontent.com", "")
@@ -154,17 +154,27 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	if fs.NArg() > 1 {
 		return errors.New("usage: ghrepo init [DIR] --repo USER/REPO [--site URL]")
 	}
+	siteSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "site" {
+			siteSet = true
+		}
+	})
 	dir := c.root()
 	if fs.NArg() == 1 {
 		dir = fs.Arg(0)
 	}
 	rp := filepath.Join(dir, "ghrepo.yaml")
 	var r contract.Repository
+	existingRepository := false
+	var originalSite contract.Site
 	if _, err := os.Lstat(rp); err == nil {
+		existingRepository = true
 		r, err = contract.ReadRepository(rp)
 		if err != nil {
 			return err
 		}
+		originalSite = r.Site
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	} else {
@@ -175,13 +185,25 @@ func (c Runner) init(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		if *siteURL == "" {
+		if !siteSet {
 			if defaultSite == "" {
 				return errors.New("cannot derive GitHub Pages URL from --repo; set --site")
 			}
 			*siteURL = defaultSite
 		}
 		r = contract.Repository{Schema: 1, Repository: contract.Repo{URL: repoURL, Branch: *branch, Layout: "flat-v1"}, APT: contract.APT{Suite: "stable", Component: "main", Architectures: []string{"amd64", "arm64"}}, RPM: contract.RPM{ID: "ghrepo", Name: "Packages", Architectures: []string{"x86_64", "aarch64"}, PackageSignature: "metadata-only"}, Downloads: contract.Download{SourceHosts: splitList(*sourceHosts), RedirectHosts: splitList(*redirectHosts), MaxBytes: 2147483647}, Site: contract.Site{BaseURL: *siteURL, MaxBytes: 1073741824, RetentionDays: 30}, Storage: contract.Storage{Backend: "none"}}
+	}
+	if siteSet {
+		r.Site.BaseURL = *siteURL
+		u, err := url.Parse(r.Site.BaseURL)
+		if err != nil {
+			return errors.New("invalid site base URL")
+		}
+		host := strings.ToLower(u.Hostname())
+		r.Site.CNAME = ""
+		if !strings.HasSuffix(host, ".github.io") {
+			r.Site.CNAME = host
+		}
 	}
 	if err := r.Validate(); err != nil {
 		return err
@@ -202,10 +224,12 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	if err := createIfAbsent(rp, func() ([]byte, error) { return contract.MarshalRepository(r) }, 0644); err != nil {
 		return err
 	}
-	if existing, err := contract.ReadRepository(rp); err == nil {
+	if !existingRepository {
+		existing, err := contract.ReadRepository(rp)
+		if err != nil {
+			return err
+		}
 		r = existing
-	} else {
-		return err
 	}
 	if err := createIfAbsent(mp, func() ([]byte, error) {
 		return contract.MarshalManifest(contract.Manifest{Schema: 1, Packages: []contract.Package{}}, r)
@@ -304,6 +328,9 @@ func (c Runner) init(ctx context.Context, args []string) error {
 				return err
 			}
 		}
+	}
+	if existingRepository && siteSet && r.Site != originalSite {
+		return contract.WriteRepository(rp, r)
 	}
 	return nil
 }

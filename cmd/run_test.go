@@ -18,15 +18,16 @@ type fixtureFetcher struct{ data map[string][]byte }
 
 func TestInitRepoAndSiteURLs(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		repo string
-		site string
+		name  string
+		args  []string
+		repo  string
+		site  string
+		cname string
 	}{
-		{"short repo", []string{"--repo", "example/packages"}, "https://github.com/example/packages", "https://example.github.io/packages"},
-		{"full repo", []string{"--repo", "https://github.com/example/packages"}, "https://github.com/example/packages", "https://example.github.io/packages"},
-		{"custom site", []string{"--repo", "example/packages", "--site", "https://packages.example.com"}, "https://github.com/example/packages", "https://packages.example.com"},
-		{"user site", []string{"--repo", "Example/Example.github.io"}, "https://github.com/Example/Example.github.io", "https://example.github.io"},
+		{"short repo", []string{"--repo", "example/packages"}, "https://github.com/example/packages", "https://example.github.io/packages", ""},
+		{"full repo", []string{"--repo", "https://github.com/example/packages"}, "https://github.com/example/packages", "https://example.github.io/packages", ""},
+		{"custom site", []string{"--repo", "example/packages", "--site", "https://packages.example.com"}, "https://github.com/example/packages", "https://packages.example.com", "packages.example.com"},
+		{"user site", []string{"--repo", "Example/Example.github.io"}, "https://github.com/Example/Example.github.io", "https://example.github.io", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -39,8 +40,8 @@ func TestInitRepoAndSiteURLs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if r.Repository.URL != tt.repo || r.Site.BaseURL != tt.site {
-				t.Fatalf("got repo %q and site %q; want %q and %q", r.Repository.URL, r.Site.BaseURL, tt.repo, tt.site)
+			if r.Repository.URL != tt.repo || r.Site.BaseURL != tt.site || r.Site.CNAME != tt.cname {
+				t.Fatalf("got repo %q, site %q, and CNAME %q; want %q, %q, and %q", r.Repository.URL, r.Site.BaseURL, r.Site.CNAME, tt.repo, tt.site, tt.cname)
 			}
 		})
 	}

@@ -597,3 +597,96 @@ func TestFailedPushLeavesRemoteUnchanged(t *testing.T) {
 		t.Fatal("retry did not publish local state")
 	}
 }
+
+func TestChangeSiteOnExistingRepository(t *testing.T) {
+	runner, dir := prepareFlow(t)
+	ctx := context.Background()
+	if err := runner.Run(ctx, []string{"rebuild"}); err != nil {
+		t.Fatal(err)
+	}
+	before, _, err := runner.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preserved := map[string][]byte{}
+	for _, name := range []string{"packages.yaml", ".ghrepo.local.yaml", "KEY.gpg", "deb/InRelease", "rpm/repodata/repomd.xml", "rpm/repodata/repomd.xml.asc", "templates/setup.sh", ".github/workflows/pages.yml"} {
+		preserved[name] = mustRead(t, filepath.Join(dir, name))
+	}
+	for _, tt := range []struct{ site, cname string }{
+		{"https://repo.example.com", "repo.example.com"},
+		{"https://other.example.com/packages", "other.example.com"},
+		{"https://example.github.io/repo", ""},
+	} {
+		t.Run(tt.site, func(t *testing.T) {
+			if err := runner.Run(ctx, []string{"init", dir, "--site", tt.site}); err != nil {
+				t.Fatal(err)
+			}
+			r, m, err := runner.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := before
+			want.Site.BaseURL, want.Site.CNAME = tt.site, tt.cname
+			if !reflect.DeepEqual(r, want) {
+				t.Fatalf("unexpected repository settings: %+v", r)
+			}
+			for name, data := range preserved {
+				if !bytes.Equal(data, mustRead(t, filepath.Join(dir, name))) {
+					t.Fatalf("site change modified %s", name)
+				}
+			}
+			config := mustRead(t, filepath.Join(dir, "ghrepo.yaml"))
+			if err := runner.Run(ctx, []string{"init"}); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(config, mustRead(t, filepath.Join(dir, "ghrepo.yaml"))) {
+				t.Fatal("init without --site changed configuration")
+			}
+			if err := runner.Run(ctx, []string{"site-build"}); err != nil {
+				t.Fatal(err)
+			}
+			output := filepath.Join(dir, "build", "site")
+			for name, fragment := range map[string]string{
+				"deb.list":   tt.site + "/deb/ ./",
+				"rpm.repo":   "baseurl=" + tt.site + "/rpm/",
+				"setup.sh":   tt.site + "/KEY.gpg",
+				"README.md":  tt.site + "/" + m.Packages[0].Path,
+				"index.html": `href="` + m.Packages[0].Path + `"`,
+			} {
+				if !strings.Contains(string(mustRead(t, filepath.Join(output, name))), fragment) {
+					t.Fatalf("%s does not contain %q", name, fragment)
+				}
+			}
+			if tt.cname != "" {
+				if got := string(mustRead(t, filepath.Join(output, "CNAME"))); got != tt.cname+"\n" {
+					t.Fatalf("unexpected CNAME: %q", got)
+				}
+			} else if _, err := os.Stat(filepath.Join(output, "CNAME")); !os.IsNotExist(err) {
+				t.Fatalf("CNAME remains after returning to GitHub Pages: %v", err)
+			}
+		})
+	}
+	config := mustRead(t, filepath.Join(dir, "ghrepo.yaml"))
+	for _, invalid := range []string{"", "http://repo.example.com", "https://repo.example.com/", "https://user:secret@repo.example.com"} {
+		if err := runner.Run(ctx, []string{"init", "--site", invalid}); err == nil {
+			t.Fatalf("accepted invalid site %q", invalid)
+		}
+		if !bytes.Equal(config, mustRead(t, filepath.Join(dir, "ghrepo.yaml"))) {
+			t.Fatal("invalid site changed configuration")
+		}
+	}
+	localPath := filepath.Join(dir, ".ghrepo.local.yaml")
+	local := mustRead(t, localPath)
+	if err := os.WriteFile(localPath, []byte("schema: 2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"init", "--site", "https://repo.example.com"}); err == nil {
+		t.Fatal("init accepted invalid local settings")
+	}
+	if !bytes.Equal(config, mustRead(t, filepath.Join(dir, "ghrepo.yaml"))) {
+		t.Fatal("failed init changed the site URL")
+	}
+	if err := os.WriteFile(localPath, local, 0600); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -44,6 +44,23 @@ the full URL in `ghrepo.yaml`. If `--site` is absent, it uses
 `https://user.github.io/repo`. For a `user.github.io` repository, it uses
 `https://user.github.io`. Set `--site` to use a custom domain.
 
+To change the site URL of an existing repository, run this command from its
+local directory, then publish the change:
+
+```sh
+ghrepo init --site https://repo.example.com
+ghrepo publish
+```
+
+Use an HTTPS URL without a trailing slash. The URL is used as supplied: a custom
+domain has no repository-name path unless you include one. An explicit `--site`
+updates `site.base_url` and sets `site.cname` to the custom hostname. A GitHub
+Pages hostname clears `site.cname`. Running `init` without `--site` keeps the
+saved site settings. Existing packages, signed metadata, local settings, and
+templates are preserved. The next site build renders the client configuration
+and links with the new URL. Configure DNS and the Pages custom domain
+separately, and update installed clients to use the new URL.
+
 ## Optional GitHub storage
 
 Set `storage.backend: github-releases`, `storage.release_prefix`, and
