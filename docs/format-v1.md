@@ -121,10 +121,12 @@ full hash in the manifest is still authoritative. These content-qualified paths
 never change when a source URL moves. `source set` changes only `url` after byte
 verification.
 
-APT `Filename` and RPM `primary.xml` `location href` use the exact manifest
-`path`, relative to the site root. No leading slash or `../` is permitted. The
-metadata reader compares the full path, size, and SHA-256 against each active
-manifest entry. Retained entries must not appear in new indexes.
+APT `Filename` is relative to the APT repository root at `<base_url>/deb/`.
+For a manifest path `deb/pool/example.deb`, the field is `pool/example.deb`.
+The APT reader prepends `deb/` before comparing the path, size, and SHA-256
+with each active manifest entry. RPM `primary.xml` `location href` uses the
+exact manifest path relative to the site root. No leading slash or `../` is
+permitted. Retained entries must not appear in new indexes.
 
 ## Local settings: `.ghrepo.local.yaml`
 
@@ -179,7 +181,7 @@ the GitHub adapter is a later stage.
 | Repository signatures   | OpenPGP RSA with SHA-256, detached RPM `repomd.xml.asc` and clear-signed APT `InRelease`                                                | `unsupported signature algorithm`                        |
 | RPM package signatures  | Existing OpenPGP RSA/SHA-256 signatures from configured trusted keys; local copy signing is conditional on stage 4 compatibility checks | `unsupported RPM package signature`                      |
 
-`deb/Packages.gz`, `deb/Release`, and `deb/InRelease` are generated locally.
+`deb/Packages`, `deb/Packages.gz`, `deb/Release`, and `deb/InRelease` are generated locally.
 Version 1 does not emit `Release.gpg`. `Acquire-By-Hash` is disabled and no
 `deb/by-hash` paths are emitted. Clients can retry during a Pages deployment
 transition. The builder keeps previous checksum-named RPM metadata files for at
@@ -188,15 +190,28 @@ files do not create package references after their retention window. The package
 retention rule above keeps old package paths available through that window. No
 SQLite, module, or delta RPM metadata is emitted.
 
+`apt.Build` writes these four APT files to a new directory from verified
+cache bytes. It orders packages by served path, uses a fixed gzip header, and
+sets the Release date to the build time. A failed build removes its new
+directory.
+The caller replaces an older `deb/` directory only after `apt.Verify` checks
+the complete new directory with `KEY.gpg`. Verification checks the RSA/SHA-256
+clear signature, the signed Release content, the compressed index hash, and
+each indexed package against the active manifest. Unsigned DEB files are
+allowed. The local HTTP compatibility test runs when APT has the Debian
+packaging backend. It checks refresh and package download. Set
+`GHREPO_APT_INSTALL=1` only in a disposable root container to also check
+installation.
+
 The RPM reader candidate is `github.com/sassoftware/go-rpmutils` v0.4.0. Its
 `ReadHeader`, `GetNEVRA`, and `PayloadReaderExtended` read the checked-in gzip,
 xz, and zstd RPM fixtures in the offline test. Its `Verify` API exists for
 signature checks, but stage 4 must confirm signed output with independent RPM
 tooling before enabling local copy signing. The DEB fixture uses Go's
 `archive/tar` and `compress/gzip`, so no third-party DEB reader is needed for
-the first compression method. Metadata generation is implemented in Go in later
-stages; this contract does not claim client compatibility before those tests
-run.
+the first compression method. RPM metadata generation is implemented in a
+later stage. APT compatibility is checked by the local HTTP test where a
+working APT client is available.
 
 ## Fixture source and license
 
