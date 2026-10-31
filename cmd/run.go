@@ -545,6 +545,9 @@ func selectOne(m contract.Manifest, s string) (int, error) {
 	return index, nil
 }
 
+// This revision contains the manifest rules used by generated data-only sites.
+const siteBuilderRevision = "d515279a6ac6145aea1e299f51a781c1a89c1272"
+
 func workflowFor(r contract.Repository) string {
 	return "name: Pages\n" +
 		"on:\n  push:\n    branches: [\"" + r.Repository.Branch + "\"]\n  workflow_dispatch:\n" +
@@ -558,7 +561,7 @@ func workflowFor(r contract.Repository) string {
 		"          if [ -f go.mod ] && grep -qx 'module github.com/asciimoth/ghrepo' go.mod; then\n" +
 		"            go run . site-build\n" +
 		"          else\n" +
-		"            go run github.com/asciimoth/ghrepo@af8e0bbc034f5196db456683934e179bcb795de4 site-build\n" +
+		"            go run github.com/asciimoth/ghrepo@" + siteBuilderRevision + " site-build\n" +
 		"          fi\n" +
 		"      - uses: actions/upload-pages-artifact@v3\n        with:\n          path: build/site\n" +
 		"  deploy:\n    needs: build\n    runs-on: ubuntu-latest\n" +

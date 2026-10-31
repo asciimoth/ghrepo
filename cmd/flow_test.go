@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -21,9 +23,20 @@ func command(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Dir = dir
+	cmd.Env = testCommandEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%v: %v: %s", args, err, out)
 	}
+}
+
+func testCommandEnv() []string {
+	var env []string
+	for _, item := range os.Environ() {
+		if !strings.HasPrefix(item, "GIT_INDEX_FILE=") {
+			env = append(env, item)
+		}
+	}
+	return env
 }
 func prepareFlow(t *testing.T) (Runner, string) {
 	t.Helper()
@@ -235,12 +248,168 @@ func TestWorkflowConfiguration(t *testing.T) {
 	if !ok || with["path"] != "build/site" {
 		t.Fatal("artifact path is not build/site")
 	}
-	if !strings.Contains(s, "go run github.com/asciimoth/ghrepo@af8e0bbc034f5196db456683934e179bcb795de4 site-build") || !strings.Contains(s, "go run . site-build") {
+	if !strings.Contains(s, "go run github.com/asciimoth/ghrepo@"+siteBuilderRevision+" site-build") || !strings.Contains(s, "go run . site-build") {
 		t.Fatal("workflow cannot run from a data-only checkout")
 	}
 	if strings.Contains(s, "ghrepo@main") {
 		t.Fatal("workflow uses a moving builder revision")
 	}
+}
+
+func TestPinnedWorkflowBuilderSupportsReplacement(t *testing.T) {
+	if _, err := os.Stat("../.git"); err != nil {
+		t.Skip("source Git history is unavailable")
+	}
+	cmd := exec.Command("git", "show", siteBuilderRevision+":contract/validate.go")
+	cmd.Dir = ".."
+	source, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("pinned builder revision is unavailable: %v", err)
+	}
+	if !bytes.Contains(source, []byte("activeIdentities")) {
+		t.Fatal("pinned builder rejects retained replacement packages")
+	}
+}
+
+func TestPinnedBuilderRerunAfterMainMoves(t *testing.T) {
+	if _, err := os.Stat("../.git"); err != nil {
+		t.Skip("source Git history is unavailable")
+	}
+	c, dataDir := prepareFlow(t)
+	_, original, err := c.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	newDEB := mustRead(t, "../contract/testdata/packages/hello_changed.deb")
+	newRPM := append(mustRead(t, "../contract/testdata/packages/empty-0.1-1.x86_64.rpm"), 0)
+	fetcher := c.Fetcher.(fixtureFetcher)
+	fetcher.data["https://example.com/new.deb"] = newDEB
+	fetcher.data["https://example.com/new.rpm"] = newRPM
+	c.Fetcher = fetcher
+	for _, p := range original.Packages {
+		url := "https://example.com/new.deb"
+		if p.Format == "rpm" {
+			url = "https://example.com/new.rpm"
+		}
+		if err := c.Run(context.Background(), []string{"replace", p.Path, url}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.Run(context.Background(), []string{"rebuild"}); err != nil {
+		t.Fatal(err)
+	}
+	command(t, dataDir, "git", "init")
+	command(t, dataDir, "git", "add", "ghrepo.yaml", "packages.yaml", "KEY.gpg", "deb", "rpm", ".github", "templates")
+	command(t, dataDir, "git", "-c", "commit.gpgsign=false", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "site inputs")
+	dataCommit := strings.TrimSpace(string(mustGitOutput(t, dataDir, "rev-parse", "HEAD")))
+	fixtures := filepath.Join(t.TempDir(), "fixtures")
+	if err := os.Mkdir(fixtures, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for source, name := range map[string]string{"../contract/testdata/packages/hello_1.2.0-1_amd64.deb": "hello.deb", "../contract/testdata/packages/empty-0.1-1.x86_64.rpm": "empty.rpm", "../contract/testdata/packages/hello_changed.deb": "new.deb"} {
+		if err := os.WriteFile(filepath.Join(fixtures, name), mustRead(t, source), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(fixtures, "new.rpm"), newRPM, 0644); err != nil {
+		t.Fatal(err)
+	}
+	clone := filepath.Join(t.TempDir(), "source")
+	command(t, "..", "git", "clone", "--no-hardlinks", "--quiet", ".", clone)
+	pinned := filepath.Join(t.TempDir(), "pinned")
+	command(t, clone, "git", "worktree", "add", "--quiet", "--detach", pinned, siteBuilderRevision)
+	harness := filepath.Join(pinned, "fixture-builder")
+	if err := os.Mkdir(harness, 0755); err != nil {
+		t.Fatal(err)
+	}
+	const source = `package main
+import (
+ "bytes"
+ "context"
+ "io"
+ "net/url"
+ "os"
+ "path/filepath"
+ "github.com/asciimoth/ghrepo/site"
+)
+type fetcher struct{}
+func (fetcher) Fetch(_ context.Context, raw string, _, _ []string) (io.ReadCloser, error) {
+ u, err := url.Parse(raw)
+ if err != nil { return nil, err }
+ data, err := os.ReadFile(filepath.Join(os.Getenv("GHREPO_TEST_FIXTURES"), filepath.Base(u.Path)))
+ if err != nil { return nil, err }
+ return io.NopCloser(bytes.NewReader(data)), nil
+}
+func main() {
+ if err := site.Build(context.Background(), os.Args[1], os.Args[2], fetcher{}); err != nil { panic(err) }
+}
+`
+	if err := os.WriteFile(filepath.Join(harness, "main.go"), []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+	build := func(output string) map[string]string {
+		t.Helper()
+		cmd := exec.Command("go", "run", "./fixture-builder", dataDir, output)
+		cmd.Dir = pinned
+		cmd.Env = append(os.Environ(), "GHREPO_TEST_FIXTURES="+fixtures)
+		if text, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("pinned builder failed: %v: %s", err, text)
+		}
+		return siteChecksums(t, output)
+	}
+	first := build(filepath.Join(t.TempDir(), "site"))
+	if err := os.WriteFile(filepath.Join(clone, "main-changed.txt"), []byte("new main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	command(t, clone, "git", "add", "main-changed.txt")
+	command(t, clone, "git", "-c", "commit.gpgsign=false", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "move main")
+	if got := strings.TrimSpace(string(mustGitOutput(t, dataDir, "rev-parse", "HEAD"))); got != dataCommit {
+		t.Fatal("site input commit changed")
+	}
+	second := build(filepath.Join(t.TempDir(), "site"))
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("pinned builder changed site after main moved: %v %v", first, second)
+	}
+}
+
+func mustGitOutput(t *testing.T, dir string, args ...string) []byte {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = testCommandEnv()
+	data, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func siteChecksums(t *testing.T, root string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		files[rel] = fmt.Sprintf("%x", sum)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }
 
 func TestPublishRejectsStagedLocalFile(t *testing.T) {

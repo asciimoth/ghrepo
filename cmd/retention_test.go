@@ -233,6 +233,16 @@ func TestRPMMetadataRetentionAge(t *testing.T) {
 	if !found {
 		t.Fatal("expired metadata deletion is not staged")
 	}
+	if err := c.git("add", "-A", "--", "rpm/repodata/"+name); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := c.gitOutput("diff", "--cached", "--name-status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(staged, []byte("D\trpm/repodata/"+name)) {
+		t.Fatalf("expired metadata deletion was not staged: %s", staged)
+	}
 }
 
 func TestSiteAfterPrune(t *testing.T) {
@@ -288,10 +298,12 @@ func TestRPMRollbackProtectsIndexedMetadataOnly(t *testing.T) {
 	if err := os.MkdirAll(data, 0755); err != nil {
 		t.Fatal(err)
 	}
-	indexed := strings.Repeat("a", 64) + "-primary.xml.gz"
-	stale := strings.Repeat("b", 64) + "-primary.xml.gz"
+	indexedBody, staleBody := []byte("indexed"), []byte("stale")
+	indexedSum, staleSum := sha256.Sum256(indexedBody), sha256.Sum256(staleBody)
+	indexed := fmt.Sprintf("%x-primary.xml.gz", indexedSum)
+	stale := fmt.Sprintf("%x-primary.xml.gz", staleSum)
 	xml := []byte(`<repomd><data type="primary"><location href="repodata/` + indexed + `"/></data></repomd>`)
-	for name, content := range map[string][]byte{"repomd.xml": xml, indexed: []byte("indexed"), stale: []byte("stale")} {
+	for name, content := range map[string][]byte{"repomd.xml": xml, indexed: indexedBody, stale: staleBody} {
 		if err := os.WriteFile(filepath.Join(data, name), content, 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -307,6 +319,24 @@ func TestRPMRollbackProtectsIndexedMetadataOnly(t *testing.T) {
 	}
 	if !protected[indexed] || protected[stale] {
 		t.Fatalf("unexpected rollback protection: %v", protected)
+	}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	c.Now = func() time.Time { return start.AddDate(0, 0, 30) }
+	if err := writeRPMRetention(data, map[string]string{indexed: start.Format(time.RFC3339), stale: start.Format(time.RFC3339)}); err != nil {
+		t.Fatal(err)
+	}
+	next := filepath.Join(t.TempDir(), "next")
+	if err := os.Mkdir(next, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.retainRPM(data, next, 30); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(next, indexed)); err != nil {
+		t.Fatal("indexed rollback metadata expired", err)
+	}
+	if _, err := os.Stat(filepath.Join(next, stale)); !os.IsNotExist(err) {
+		t.Fatal("stale rollback metadata was retained")
 	}
 }
 
@@ -420,5 +450,55 @@ func TestReplacementRollbackBuildsOldBytes(t *testing.T) {
 				t.Fatal("new package remained after rollback")
 			}
 		}
+	}
+}
+
+func TestPruneWaitsForSignedIndexRefresh(t *testing.T) {
+	c, _ := prepareFlow(t)
+	ctx := context.Background()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := start
+	c.Now = func() time.Time { return now }
+	if err := c.Run(ctx, []string{"rebuild"}); err != nil {
+		t.Fatal(err)
+	}
+	_, m, err := c.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oldPath string
+	for _, p := range m.Packages {
+		if p.Format == "deb" {
+			oldPath = p.Path
+		}
+	}
+	if oldPath == "" {
+		t.Fatal("missing DEB fixture")
+	}
+	if err := c.Run(ctx, []string{"remove", oldPath}); err != nil {
+		t.Fatal(err)
+	}
+	now = start.AddDate(0, 0, 30)
+	var out bytes.Buffer
+	c.Out = &out
+	if err := c.Run(ctx, []string{"prune", "--apply"}); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() != 0 {
+		t.Fatal("pruned package still in signed index")
+	}
+	_, m, err = c.load()
+	if err != nil || len(m.Packages) != 2 {
+		t.Fatalf("package removed before index refresh: %v %v", m, err)
+	}
+	if err := c.Run(ctx, []string{"rebuild"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Run(ctx, []string{"prune", "--apply"}); err != nil {
+		t.Fatal(err)
+	}
+	_, m, err = c.load()
+	if err != nil || len(m.Packages) != 1 {
+		t.Fatalf("prune did not remove expired package: %v %v", m, err)
 	}
 }
