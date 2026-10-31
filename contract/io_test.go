@@ -151,7 +151,11 @@ func TestManifestRejectCases(t *testing.T) {
 	q.SHA256 = strings.Repeat("b", 64)
 	q.Path, _ = ServedPath(q)
 	if err := (Manifest{Schema: 1, Packages: []Package{p, q}}).Validate(r); err == nil {
-		t.Fatal("accepted duplicate identity")
+		t.Fatal("accepted duplicate active identity")
+	}
+	q.State, q.RetainedAt = "retained", "2026-10-31T00:00:00Z"
+	if err := (Manifest{Schema: 1, Packages: []Package{p, q}}).Validate(r); err != nil {
+		t.Fatal(err)
 	}
 }
 

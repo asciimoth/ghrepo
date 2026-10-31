@@ -49,13 +49,15 @@ func (c Runner) paths() (string, string, string) {
 }
 func (c Runner) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: ghrepo init|add|sync|source set|remove|rebuild|check|publish|gc|site-build")
+		return errors.New("usage: ghrepo init|add|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build")
 	}
 	switch args[0] {
 	case "init":
 		return c.init(ctx, args[1:])
 	case "add":
 		return c.add(ctx, args[1:])
+	case "replace":
+		return c.replacePackage(ctx, args[1:])
 	case "sync":
 		return c.sync(ctx, args[1:])
 	case "source":
@@ -65,6 +67,8 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		return errors.New("usage: ghrepo source set SELECTOR URL")
 	case "remove":
 		return c.remove(args[1:])
+	case "prune":
+		return c.prune(args[1:])
 	case "rebuild":
 		if len(args) != 1 {
 			return errors.New("usage: ghrepo rebuild")
@@ -360,14 +364,14 @@ func (c Runner) add(ctx context.Context, args []string) error {
 		fetcher = cache.HTTPFetcher{}
 	}
 	for _, raw := range args {
-		if err := addOne(ctx, raw, dir, r, &m, fetcher); err != nil {
+		if err := addOne(ctx, raw, dir, r, &m, fetcher, -1, time.Time{}); err != nil {
 			return err
 		}
 	}
 	return c.save(m, r)
 }
 
-func addOne(ctx context.Context, raw, dir string, r contract.Repository, m *contract.Manifest, fetcher cache.Fetcher) error {
+func addOne(ctx context.Context, raw, dir string, r contract.Repository, m *contract.Manifest, fetcher cache.Fetcher, replaceIndex int, now time.Time) error {
 	if err := contract.ValidateSourceURL(raw, r.Downloads.SourceHosts); err != nil {
 		return err
 	}
@@ -411,12 +415,33 @@ func addOne(ctx context.Context, raw, dir string, r contract.Repository, m *cont
 	if err := cache.VerifyFile(name, p); err != nil {
 		return err
 	}
+	if replaceIndex >= 0 {
+		old := m.Packages[replaceIndex]
+		if !sameIdentity(old, p) || old.SHA256 == p.SHA256 {
+			return errors.New("replacement needs different bytes with the same identity")
+		}
+		if old.State == "active" {
+			m.Packages[replaceIndex].State = "retained"
+			m.Packages[replaceIndex].RetainedAt = now.UTC().Format(time.RFC3339)
+		}
+		m.Packages = append(m.Packages, p)
+		if err := m.Validate(r); err != nil {
+			return err
+		}
+		return os.Rename(name, filepath.Join(dir, digest))
+	}
+	for _, old := range m.Packages {
+		if old.State != "active" || !sameIdentity(old, p) {
+			continue
+		}
+		if old.SHA256 != p.SHA256 || old.Size != p.Size {
+			return errors.New("package identity already has different bytes")
+		}
+		return nil
+	}
 	for _, old := range m.Packages {
 		if sameIdentity(old, p) {
-			if old.SHA256 != p.SHA256 || old.Size != p.Size {
-				return errors.New("package identity already has different bytes")
-			}
-			return nil
+			return errors.New("package identity is retained; use an explicit replacement operation")
 		}
 	}
 	m.Packages = append(m.Packages, p)
@@ -528,7 +553,13 @@ func workflowFor(r contract.Repository) string {
 		"jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n" +
 		"      - uses: actions/checkout@v4\n" +
 		"      - uses: actions/setup-go@v5\n        with:\n          go-version: '1.25.5'\n" +
-		"      - run: go run github.com/asciimoth/ghrepo@main site-build\n" +
+		"      - name: Build site from this commit or pinned builder\n" +
+		"        run: |\n" +
+		"          if [ -f go.mod ] && grep -qx 'module github.com/asciimoth/ghrepo' go.mod; then\n" +
+		"            go run . site-build\n" +
+		"          else\n" +
+		"            go run github.com/asciimoth/ghrepo@af8e0bbc034f5196db456683934e179bcb795de4 site-build\n" +
+		"          fi\n" +
 		"      - uses: actions/upload-pages-artifact@v3\n        with:\n          path: build/site\n" +
 		"  deploy:\n    needs: build\n    runs-on: ubuntu-latest\n" +
 		"    environment:\n      name: github-pages\n      url: ${{ steps.deployment.outputs.page_url }}\n" +

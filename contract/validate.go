@@ -200,7 +200,7 @@ func (m Manifest) Validate(r Repository) error {
 		return errors.New("invalid manifest schema or missing packages")
 	}
 	paths := map[string]bool{}
-	identities := map[string]bool{}
+	activeIdentities := map[string]bool{}
 	for n, p := range m.Packages {
 		if err := SafePath(p.Path); err != nil {
 			return fmt.Errorf("package %d: %w", n, err)
@@ -241,10 +241,13 @@ func (m Manifest) Validate(r Repository) error {
 			return fmt.Errorf("package %d: architecture is not configured", n)
 		}
 		identity := p.Format + "/" + p.Identity.Name + "/" + p.Identity.Epoch + "/" + p.Identity.Version + "/" + p.Identity.Release + "/" + p.Identity.Architecture
-		if paths[p.Path] || identities[identity] {
+		if paths[p.Path] || (p.State == "active" && activeIdentities[identity]) {
 			return fmt.Errorf("package %d: duplicate path or identity", n)
 		}
-		paths[p.Path], identities[identity] = true, true
+		paths[p.Path] = true
+		if p.State == "active" {
+			activeIdentities[identity] = true
+		}
 	}
 	return nil
 }

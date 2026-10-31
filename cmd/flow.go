@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/asciimoth/ghrepo/apt"
 	"github.com/asciimoth/ghrepo/cache"
@@ -116,7 +117,7 @@ func (c Runner) rebuild(ctx context.Context) error {
 	if err := rpm.BuildWithKeyRoot(filepath.Join(dir, "new-rpm"), cacheRoot, c.root(), r, m, local); err != nil {
 		return err
 	}
-	if err := retainRPM(filepath.Join(c.root(), "rpm", "repodata"), filepath.Join(dir, "new-rpm", "repodata")); err != nil {
+	if err := c.retainRPM(filepath.Join(c.root(), "rpm", "repodata"), filepath.Join(dir, "new-rpm", "repodata"), r.Site.RetentionDays); err != nil {
 		return err
 	}
 	key := filepath.Join(c.root(), "KEY.gpg")
@@ -185,10 +186,41 @@ func (c Runner) rebuild(ctx context.Context) error {
 
 var oldRPMName = regexp.MustCompile(`^[a-f0-9]{64}-(primary|filelists|other)\.xml\.gz$`)
 
-func retainRPM(old, next string) error {
+func (c Runner) retainRPM(old, next string, days int) error {
+	var record map[string]string
+	data, err := os.ReadFile(filepath.Join(old, "retention.json"))
+	if err == nil {
+		if err := json.Unmarshal(data, &record); err != nil {
+			return errors.New("invalid RPM retention record")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if record == nil {
+		record = map[string]string{}
+	}
+	protected, err := c.protectedRPMMetadata()
+	if err != nil {
+		return err
+	}
+	nextEntries, err := os.ReadDir(next)
+	if err != nil {
+		return err
+	}
+	current := map[string]bool{}
+	seen := map[string]bool{}
+	for _, e := range nextEntries {
+		if oldRPMName.MatchString(e.Name()) {
+			current[e.Name()] = true
+			seen[e.Name()] = true
+			if record[e.Name()] == "" {
+				record[e.Name()] = c.now().Format(time.RFC3339)
+			}
+		}
+	}
 	entries, err := os.ReadDir(old)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return writeRPMRetention(next, record)
 	}
 	if err != nil {
 		return err
@@ -197,12 +229,24 @@ func retainRPM(old, next string) error {
 		if !oldRPMName.MatchString(e.Name()) {
 			continue
 		}
+		seen[e.Name()] = true
 		info, err := e.Info()
 		if err != nil {
 			return err
 		}
 		if !info.Mode().IsRegular() || info.Size() > 128<<20 {
 			return errors.New("invalid retained RPM metadata file")
+		}
+		if record[e.Name()] == "" {
+			record[e.Name()] = c.now().Format(time.RFC3339)
+		}
+		first, parseErr := time.Parse(time.RFC3339, record[e.Name()])
+		if parseErr != nil || first.Location() != time.UTC {
+			return errors.New("invalid RPM retention timestamp")
+		}
+		if !current[e.Name()] && !protected[e.Name()] && !c.now().Before(first.AddDate(0, 0, days)) {
+			delete(record, e.Name())
+			continue
 		}
 		src, dst := filepath.Join(old, e.Name()), filepath.Join(next, e.Name())
 		if _, err := os.Stat(dst); err == nil {
@@ -230,7 +274,12 @@ func retainRPM(old, next string) error {
 			return errors.New("retained RPM metadata checksum mismatch")
 		}
 	}
-	return nil
+	for name := range record {
+		if !seen[name] {
+			delete(record, name)
+		}
+	}
+	return writeRPMRetention(next, record)
 }
 func copyPackage(src, dst string) error {
 	info, err := os.Lstat(src)
@@ -416,7 +465,7 @@ func (c Runner) allowedGitPaths() ([]string, error) {
 			trackedSet[p] = true
 		}
 	}
-	paths := []string{"ghrepo.yaml", "packages.yaml", "KEY.gpg", ".gitignore", ".github/workflows/pages.yml", "deb/Packages", "deb/Packages.gz", "deb/Release", "deb/InRelease", "rpm/repodata/repomd.xml", "rpm/repodata/repomd.xml.asc"}
+	paths := []string{"ghrepo.yaml", "packages.yaml", "KEY.gpg", ".gitignore", ".github/workflows/pages.yml", "deb/Packages", "deb/Packages.gz", "deb/Release", "deb/InRelease", "rpm/repodata/repomd.xml", "rpm/repodata/repomd.xml.asc", "rpm/repodata/retention.json"}
 	for _, name := range []string{"index.html", "README.md", "setup.sh", "deb.list", "rpm.repo"} {
 		path := "templates/" + name
 		if _, err := os.Lstat(filepath.Join(c.root(), path)); err == nil || (errors.Is(err, os.ErrNotExist) && trackedSet[path]) {
@@ -461,7 +510,7 @@ func safeGitPath(p string) bool {
 	if strings.HasPrefix(p, "templates/") {
 		return p == "templates/index.html" || p == "templates/README.md" || p == "templates/setup.sh" || p == "templates/deb.list" || p == "templates/rpm.repo"
 	}
-	if p == "deb/Packages" || p == "deb/Packages.gz" || p == "deb/Release" || p == "deb/InRelease" || p == "rpm/repodata/repomd.xml" || p == "rpm/repodata/repomd.xml.asc" {
+	if p == "deb/Packages" || p == "deb/Packages.gz" || p == "deb/Release" || p == "deb/InRelease" || p == "rpm/repodata/repomd.xml" || p == "rpm/repodata/repomd.xml.asc" || p == "rpm/repodata/retention.json" {
 		return true
 	}
 	return strings.HasPrefix(p, "rpm/repodata/") && oldRPMName.MatchString(strings.TrimPrefix(p, "rpm/repodata/"))

@@ -168,7 +168,20 @@ func (c Runner) uploadOne(ctx context.Context, file string, sign bool, g *storag
 	}
 	existing := -1
 	for i, old := range m.Packages {
-		if sameIdentity(old, p) {
+		if old.State != "active" || !sameIdentity(old, p) {
+			continue
+		}
+		if old.SHA256 != p.SHA256 || old.Size != p.Size {
+			return errors.New("package identity already has different bytes")
+		}
+		existing = i
+		break
+	}
+	if existing < 0 {
+		for i, old := range m.Packages {
+			if !sameIdentity(old, p) {
+				continue
+			}
 			if old.SHA256 != p.SHA256 || old.Size != p.Size {
 				return errors.New("package identity already has different bytes")
 			}

@@ -12,7 +12,9 @@ ghrepo init --repo https://github.com/example/repo --site https://example.github
 ghrepo add https://example.com/releases/hello.deb
 ghrepo sync
 ghrepo source set deb/hello/amd64/1.2.0-1 https://example.com/releases/hello-moved.deb
-ghrepo remove deb/hello/amd64/1.2.0-1
+ghrepo replace deb/hello/amd64/1.2.0-1 https://example.com/releases/hello-rebuilt.deb
+ghrepo prune
+ghrepo prune --apply
 ghrepo rebuild
 ghrepo check
 ghrepo publish --dry-run
@@ -25,8 +27,12 @@ URL against the stored size and SHA-256 before it changes the manifest. `remove`
 marks an entry as retained. These commands do not publish or push. The `rebuild`
 command verifies cached package bytes, signs new APT and RPM indexes, verifies
 both indexes with `KEY.gpg`, and replaces the prior metadata as one recoverable
-transaction. `check` checks source URLs, signatures, indexed package bytes, and
-the rendered site size. `publish --dry-run` runs `sync`, `rebuild`, and `check`,
+transaction. `replace` checks new bytes with the same package identity and
+retains the old served path. `prune` previews retained paths that have passed
+the configured retention period and have no signed index or rollback reference;
+`--apply` removes these paths from the manifest. `check` checks source URLs,
+signatures, indexed package bytes, and the rendered site size.
+`publish --dry-run` runs `sync`, `rebuild`, and `check`,
 then prints the exact Git path changes without committing or pushing. `publish`
 stages only the configuration, templates, public keys, manifest, workflow, and
 signed metadata. It commits and pushes to `origin`. The ignored

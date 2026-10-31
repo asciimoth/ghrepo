@@ -235,8 +235,11 @@ func TestWorkflowConfiguration(t *testing.T) {
 	if !ok || with["path"] != "build/site" {
 		t.Fatal("artifact path is not build/site")
 	}
-	if !strings.Contains(s, "go run github.com/asciimoth/ghrepo@main site-build") {
+	if !strings.Contains(s, "go run github.com/asciimoth/ghrepo@af8e0bbc034f5196db456683934e179bcb795de4 site-build") || !strings.Contains(s, "go run . site-build") {
 		t.Fatal("workflow cannot run from a data-only checkout")
+	}
+	if strings.Contains(s, "ghrepo@main") {
+		t.Fatal("workflow uses a moving builder revision")
 	}
 }
 
