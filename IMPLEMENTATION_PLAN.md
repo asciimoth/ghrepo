@@ -206,11 +206,11 @@ from `remove`, and show which entries are eligible before changing the manifest.
 Test the retention boundary, rollback references, and site output after pruning.
 
 Add an explicit replacement operation for a package with the same identity but
-different bytes. Inspect and verify the new bytes, assign a new content-qualified
-served path, and retain the old path for clients with cached indexes. Update the
-manifest rules so one active entry and a retained prior entry can share an
-identity without allowing two active entries. Test replacement and rollback for
-both DEB and RPM packages.
+different bytes. Inspect and verify the new bytes, assign a new
+content-qualified served path, and retain the old path for clients with cached
+indexes. Update the manifest rules so one active entry and a retained prior
+entry can share an identity without allowing two active entries. Test
+replacement and rollback for both DEB and RPM packages.
 
 Track when each checksum-named RPM metadata file entered the repository. Keep
 old files for at least the configured retention period, then remove files that

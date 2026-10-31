@@ -32,12 +32,12 @@ retains the old served path. `prune` previews retained paths that have passed
 the configured retention period and have no signed index or rollback reference;
 `--apply` removes these paths from the manifest. `check` checks source URLs,
 signatures, indexed package bytes, and the rendered site size.
-`publish --dry-run` runs `sync`, `rebuild`, and `check`,
-then prints the exact Git path changes without committing or pushing. `publish`
-stages only the configuration, templates, public keys, manifest, workflow, and
-signed metadata. It commits and pushes to `origin`. The ignored
-`.ghrepo-transaction/` directory records interrupted metadata swaps and is
-restored on the next `rebuild` or `check`.
+`publish --dry-run` runs `sync`, `rebuild`, and `check`, then prints the exact
+Git path changes without committing or pushing. `publish` stages only the
+configuration, templates, public keys, manifest, workflow, and signed metadata.
+It commits and pushes to `origin`. The ignored `.ghrepo-transaction/` directory
+records interrupted metadata swaps and is restored on the next `rebuild` or
+`check`.
 
 `init` accepts `user/repo` or a full GitHub HTTPS URL for `--repo`. It stores
 the full URL in `ghrepo.yaml`. If `--site` is absent, it uses

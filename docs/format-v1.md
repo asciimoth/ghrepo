@@ -115,8 +115,8 @@ inspects new bytes with the same identity, retains the former active path, and
 adds the new content-qualified path as active. Two active entries cannot share
 an identity. `ghrepo prune` reports eligible retained paths. The
 `ghrepo prune --apply` command removes them after the retention period, provided
-the current signed indexes and other Git branch or tag tip manifests do not reference
-them. Pruning leaves package bytes in the local cache.
+the current signed indexes and other Git branch or tag tip manifests do not
+reference them. Pruning leaves package bytes in the local cache.
 
 Served paths use `/` separators and no leading slash, empty segment, `.`, `..`,
 backslash, percent escape, query, fragment, or control character. DEBs use
@@ -200,15 +200,14 @@ added to an immutable release.
 `deb/Packages`, `deb/Packages.gz`, `deb/Release`, and `deb/InRelease` are
 generated locally. Version 1 does not emit `Release.gpg`. `Acquire-By-Hash` is
 disabled and no `deb/by-hash` paths are emitted. Clients can retry during a
-Pages deployment transition. The builder records the first repository entry
-time of each checksum-named RPM metadata file in
-`rpm/repodata/retention.json`. It keeps files for at least
-`site.retention_days` and keeps files referenced by `repomd.xml` in other branch
-or tag tip trees.
-Expired files leave the next rebuilt metadata tree and Git staging includes
-their deletions. New `repomd.xml` references only current metadata. Old files
-can protect package paths from pruning while they remain in the repository.
-No SQLite, module, or delta RPM metadata is emitted.
+Pages deployment transition. The builder records the first repository entry time
+of each checksum-named RPM metadata file in `rpm/repodata/retention.json`. It
+keeps files for at least `site.retention_days` and keeps files referenced by
+`repomd.xml` in other branch or tag tip trees. Expired files leave the next
+rebuilt metadata tree and Git staging includes their deletions. New `repomd.xml`
+references only current metadata. Old files can protect package paths from
+pruning while they remain in the repository. No SQLite, module, or delta RPM
+metadata is emitted.
 
 `apt.Build` writes these four APT files to a new directory from verified cache
 bytes. It orders packages by served path, uses a fixed gzip header, and sets the
@@ -311,6 +310,6 @@ transaction records, and build output even when ignore rules change.
 
 The generated Pages workflow builds from the triggering commit when its checkout
 contains the ghrepo Go module. A data-only checkout uses a fixed ghrepo commit
-revision recorded in the workflow. Its
-build job uploads only `build/site/`. Its deploy job uses the `github-pages`
-environment and grants `pages: write` and `id-token: write` permissions.
+revision recorded in the workflow. Its build job uploads only `build/site/`. Its
+deploy job uses the `github-pages` environment and grants `pages: write` and
+`id-token: write` permissions.
