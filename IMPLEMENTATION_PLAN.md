@@ -172,7 +172,7 @@ repository. The normal local commands do not need GitHub API access.
 build preserves prior signed files, a failed push leaves the remote unchanged,
 and a temp bare remote receives one complete manifest-and-metadata commit.
 
-## 7. Add GitHub integration and live acceptance tests
+## 7. Add GitHub integration and offline acceptance tests
 
 Implement the optional GitHub backend behind the storage and publishing
 interfaces. Read `GH_TOKEN` or local credentials without logging them. Add
@@ -184,13 +184,15 @@ asset. Record progress for resume. Implement `gc` as a report limited to
 unreferenced maintainer-owned assets; account for retained and rollback
 references and the chosen immutable-release policy.
 
-Run live acceptance tests in a disposable public repository: configure Pages for
-GitHub Actions, publish APT and RPM fixtures, verify APT and DNF clients, check
-a changed or missing upstream URL blocks deployment, test retention and
-rollback, and confirm the Pages artifact and Git history contain no local
-secrets or package bytes. Record observed Pages build time and site size. Run
-these tests only after the offline gates pass.
+Use local TLS test servers to check the GitHub API contract, release buckets,
+asset upload and public-byte verification, Pages setup, error responses, and
+credential redaction. Use the in-memory storage backend and temporary bare Git
+remotes to check manifest changes, resume, garbage-collection references,
+retention, rollback, and the strict Git staging allowlist. Keep normal tests
+offline. A maintainer may also run a manual check in a disposable public
+repository, including Pages deployment time and site size; this is not a test or
+acceptance gate.
 
-**Done when:** the live repository passes every acceptance check in the design
-and the workflow leaves the last successful deployment in place after a failed
-build.
+**Done when:** offline tests cover the GitHub adapter and command flow,
+including failed uploads and downloads, duplicate assets, bucket rollover, Pages
+configuration, and secret exclusion. Manual GitHub checks are optional.

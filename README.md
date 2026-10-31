@@ -33,6 +33,40 @@ signed metadata. It commits and pushes to `origin`. The ignored
 `.ghrepo-transaction/` directory records interrupted metadata swaps and is
 restored on the next `rebuild` or `check`.
 
+## Optional GitHub storage
+
+Set `storage.backend: github-releases`, `storage.release_prefix`, and
+`storage.bucket_size` (1–1000) in `ghrepo.yaml`. Set `GH_TOKEN` in the
+environment or ignored local settings. Release uploads need repository Contents
+write access. Include `github.com` in `downloads.source_hosts` for uploads.
+
+```sh
+ghrepo init --repo https://github.com/example/repo --site https://example.github.io/repo --create-remote --configure-pages
+ghrepo add --upload ./hello.deb ./tool.rpm
+ghrepo add --upload --sign-rpm ./tool.rpm
+ghrepo gc
+```
+
+`--create-remote` creates a public repository and adds `origin`.
+`--configure-pages` selects GitHub Actions for Pages. Both options use the
+GitHub API. `add --upload` puts SHA-256-named assets in numbered releases,
+checks their public bytes, and then adds their URLs to the manifest. If the same
+package has an upstream URL, it changes that entry to the owned URL after
+verification. With the trusted RPM package policy, it signs a copy when the
+original signature is not trusted and a local signing key is configured.
+`--sign-rpm` requests a signed copy explicitly. Repeat an interrupted upload
+command to resume it; an existing asset is checked before use. `gc` reports
+unreferenced owned assets but does not delete them. It protects references in
+the current manifest and branch or tag tip manifests. Upload progress stays in
+ignored `.ghrepo-upload/` until the manifest is saved.
+
+This bucket policy requires mutable GitHub Releases. The adapter reuses a
+verified asset in an existing immutable release but cannot add new assets to
+one.
+
+Normal tests use local TLS servers. A manual check in a disposable public
+repository can confirm GitHub Pages deployment behavior.
+
 The generated Pages workflow runs `ghrepo site-build` from a clean checkout.
 This command downloads all active and retained packages from their HTTPS source
 URLs, checks their size and SHA-256, verifies the signed APT and RPM metadata

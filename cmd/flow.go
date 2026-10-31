@@ -76,14 +76,7 @@ func (c Runner) recoverTransaction() error {
 }
 
 func (c Runner) local() (contract.Local, error) {
-	env := map[string]string{}
-	for _, s := range os.Environ() {
-		k, v, ok := strings.Cut(s, "=")
-		if ok {
-			env[k] = v
-		}
-	}
-	return contract.LoadEffectiveLocal(filepath.Join(c.root(), ".ghrepo.local.yaml"), env)
+	return contract.LoadEffectiveLocal(filepath.Join(c.root(), ".ghrepo.local.yaml"), processEnv())
 }
 
 func (c Runner) rebuild(ctx context.Context) error {

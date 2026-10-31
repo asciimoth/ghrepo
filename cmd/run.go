@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,10 +23,12 @@ import (
 )
 
 type Runner struct {
-	Out     io.Writer
-	Dir     string
-	Fetcher cache.Fetcher
-	Now     func() time.Time
+	Out          io.Writer
+	Dir          string
+	Fetcher      cache.Fetcher
+	Now          func() time.Time
+	GitHubAPIURL string
+	GitHubClient *http.Client
 }
 
 func (c Runner) root() string {
@@ -46,11 +49,11 @@ func (c Runner) paths() (string, string, string) {
 }
 func (c Runner) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: ghrepo init|add|sync|source set|remove|rebuild|check|publish|site-build")
+		return errors.New("usage: ghrepo init|add|sync|source set|remove|rebuild|check|publish|gc|site-build")
 	}
 	switch args[0] {
 	case "init":
-		return c.init(args[1:])
+		return c.init(ctx, args[1:])
 	case "add":
 		return c.add(ctx, args[1:])
 	case "sync":
@@ -74,6 +77,8 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		return c.check(ctx)
 	case "publish":
 		return c.publish(ctx, args[1:])
+	case "gc":
+		return c.gc(ctx, args[1:])
 	case "site-build":
 		if len(args) != 1 {
 			return errors.New("usage: ghrepo site-build")
@@ -96,15 +101,17 @@ func (c Runner) save(m contract.Manifest, r contract.Repository) error {
 	_, mp, _ := c.paths()
 	return contract.WriteManifest(mp, m, r)
 }
-func (c Runner) init(args []string) error {
+func (c Runner) init(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	repo := fs.String("repo", "", "public repository HTTPS URL")
 	siteURL := fs.String("site", "", "site HTTPS base URL")
 	branch := fs.String("branch", "main", "")
 	sourceHosts := fs.String("source-hosts", "github.com", "")
-	redirectHosts := fs.String("redirect-hosts", "release-assets.githubusercontent.com", "")
+	redirectHosts := fs.String("redirect-hosts", "release-assets.githubusercontent.com,objects.githubusercontent.com", "")
 	keyID := fs.String("key-id", "", "")
+	createRemote := fs.Bool("create-remote", false, "create public GitHub repository and origin remote")
+	configurePages := fs.Bool("configure-pages", false, "use GitHub Actions for Pages")
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		args = append(args[1:], args[0])
 	}
@@ -220,6 +227,45 @@ func (c Runner) init(args []string) error {
 			return err
 		}
 	}
+	if *createRemote || *configurePages {
+		local, err := contract.LoadEffectiveLocal(filepath.Join(dir, ".ghrepo.local.yaml"), processEnv())
+		if err != nil {
+			return err
+		}
+		g, err := c.githubFor(r, local)
+		if err != nil {
+			return err
+		}
+		if *createRemote {
+			origin := exec.Command("git", "remote", "get-url", "origin")
+			origin.Dir = dir
+			current, e := origin.Output()
+			if e == nil && strings.TrimSpace(string(current)) != r.Repository.URL {
+				return errors.New("existing origin does not match repository URL")
+			}
+			if e != nil {
+				var exit *exec.ExitError
+				if !errors.As(e, &exit) {
+					return errors.New("cannot inspect git origin")
+				}
+			}
+			if err := g.CreateRepository(ctx); err != nil {
+				return err
+			}
+			if e != nil {
+				command := exec.Command("git", "remote", "add", "origin", r.Repository.URL)
+				command.Dir = dir
+				if err := command.Run(); err != nil {
+					return errors.New("git origin setup failed")
+				}
+			}
+		}
+		if *configurePages {
+			if err := g.ConfigurePages(ctx); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 func splitList(s string) []string {
@@ -276,7 +322,7 @@ func appendIgnore(name string) error {
 		return err
 	}
 	text := string(existing)
-	for _, entry := range []string{".ghrepo.local.yaml", ".env", "local-cache/", "build/", ".ghrepo-transaction/"} {
+	for _, entry := range []string{".ghrepo.local.yaml", ".env", "local-cache/", "build/", ".ghrepo-transaction/", ".ghrepo-upload/"} {
 		found := false
 		for _, line := range strings.Split(text, "\n") {
 			if line == entry {
@@ -296,6 +342,9 @@ func appendIgnore(name string) error {
 func (c Runner) add(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("add requires URLs")
+	}
+	if args[0] == "--upload" || args[0] == "--sign-rpm" {
+		return c.addUpload(ctx, args)
 	}
 	r, m, err := c.load()
 	if err != nil {

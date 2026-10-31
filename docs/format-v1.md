@@ -25,7 +25,7 @@ rpm:
   package_signature: metadata-only
 downloads:
   source_hosts: [github.com]
-  redirect_hosts: [release-assets.githubusercontent.com]
+  redirect_hosts: [release-assets.githubusercontent.com, objects.githubusercontent.com]
   max_bytes: 2147483647
 site:
   base_url: https://example.github.io/packages
@@ -106,9 +106,11 @@ identity is `(name, epoch, version, release, architecture)`, with absent epoch
 normalized to `0`. `Identity.epoch` is used only for RPM. Selectors are either
 the exact served `path`, `deb/<name>/<architecture>/<version>`, or
 `rpm/<name>/<architecture>/<epoch>/<version>/<release>`. A selector must match
-exactly one entry; zero or multiple matches are errors. Repeating an add with
-the same identity and same bytes is a no-op. The same identity with different
-bytes is a conflict until an explicit replacement operation is implemented.
+exactly one entry; zero or multiple matches are errors. Repeating `add URL` with
+the same identity and bytes is a no-op. Explicit `add --upload` changes an
+existing upstream entry with the same bytes to an owned source URL. It keeps the
+entry's active or retained state. The same identity with different bytes is a
+conflict until an explicit replacement operation is implemented.
 
 Served paths use `/` separators and no leading slash, empty segment, `.`, `..`,
 backslash, percent escape, query, fragment, or control character. DEBs use
@@ -169,8 +171,14 @@ manifest validator and SHA-256 verifier for cache hits and new downloads.
 source changes and site builds use this operation. The default HTTP transport
 resolves source hosts and connects only to public addresses, including after
 redirects. Its injected client option is for local TLS tests. The
-`storage.Backend` interface has an offline in-memory implementation for tests;
-the GitHub adapter is a later stage.
+`storage.Backend` has an offline in-memory implementation and a GitHub Releases
+adapter. The GitHub adapter uses numbered release buckets, uploads only
+SHA-256-named assets, and reads the public URL back before it returns. Its tests
+use local TLS servers. `ghrepo gc` reports unreferenced owned assets in the
+configured buckets; it preserves URLs in the current manifest and branch or tag
+tip manifests. It does not delete assets. Numbered buckets require mutable
+releases. Existing immutable assets can be verified, but new assets cannot be
+added to an immutable release.
 
 ## Signed output and support limits
 
