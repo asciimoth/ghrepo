@@ -201,7 +201,7 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	}, 0644); err != nil {
 		return err
 	}
-	configured, err := contract.ReadLocal(filepath.Join(dir, ".ghrepo.local.yaml"))
+	configured, err := contract.LoadEffectiveLocal(filepath.Join(dir, ".ghrepo.local.yaml"), processEnv())
 	if err != nil {
 		return err
 	}
@@ -232,11 +232,7 @@ func (c Runner) init(ctx context.Context, args []string) error {
 		}
 	}
 	if *createRemote || *configurePages {
-		local, err := contract.LoadEffectiveLocal(filepath.Join(dir, ".ghrepo.local.yaml"), processEnv())
-		if err != nil {
-			return err
-		}
-		g, err := c.githubFor(r, local)
+		g, err := c.githubFor(r, configured)
 		if err != nil {
 			return err
 		}

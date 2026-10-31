@@ -201,6 +201,49 @@ func TestInitExportsConfiguredPublicKeyWithoutReplacingIt(t *testing.T) {
 		t.Fatal("repeat init replaced public key")
 	}
 }
+
+func TestInitExportsEffectivePublicKey(t *testing.T) {
+	tools := t.TempDir()
+	program := filepath.Join(tools, "gpg")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\nprintf '%s|%s' \"$3\" \"$GNUPGHOME\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+	dir := t.TempDir()
+	runner := Runner{Dir: dir}
+	ctx := context.Background()
+	init := []string{"init", "--repo", "https://github.com/example/repo", "--site", "https://example.github.io/repo"}
+	if err := runner.Run(ctx, init); err != nil {
+		t.Fatal(err)
+	}
+	envFile := filepath.Join(dir, ".env")
+	if err := os.WriteFile(envFile, []byte("GHREPO_GPG_KEY_ID=ENVKEY\nGHREPO_GPG_HOME=/env-home\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	local := contract.Local{Schema: 1, GPG: contract.LocalGPG{KeyID: "LOCALKEY", Home: "/local-home"}, GitHub: contract.LocalGitHub{EnvFile: envFile}}
+	if err := contract.WriteLocal(filepath.Join(dir, ".ghrepo.local.yaml"), local); err != nil {
+		t.Fatal(err)
+	}
+	key := filepath.Join(dir, "KEY.gpg")
+	if err := runner.Run(ctx, []string{"init"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(mustRead(t, key)); got != "ENVKEY|/env-home" {
+		t.Fatalf(".env key selection: %q", got)
+	}
+	if err := os.Remove(key); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GHREPO_GPG_KEY_ID", "PROCESSKEY")
+	t.Setenv("GHREPO_GPG_HOME", "/process-home")
+	if err := runner.Run(ctx, []string{"init"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(mustRead(t, key)); got != "PROCESSKEY|/process-home" {
+		t.Fatalf("process key selection: %q", got)
+	}
+}
+
 func mustRead(t *testing.T, name string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(name)
