@@ -50,8 +50,13 @@ func (c Runner) paths() (string, string, string) {
 	return filepath.Join(d, "ghrepo.yaml"), filepath.Join(d, "packages.yaml"), filepath.Join(d, "local-cache")
 }
 func (c Runner) Run(ctx context.Context, args []string) error {
+	var err error
+	c, args, err = c.repositoryDir(args)
+	if err != nil {
+		return err
+	}
 	if len(args) == 0 {
-		return errors.New("usage: ghrepo init|add|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build")
+		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build")
 	}
 	switch args[0] {
 	case "init":
@@ -93,6 +98,44 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 	default:
 		return errors.New("unknown command")
 	}
+}
+
+func (c Runner) repositoryDir(args []string) (Runner, []string, error) {
+	if c.Dir == "" {
+		c.Dir = os.Getenv("GHREPO_REPO_DIR")
+	}
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			filtered = append(filtered, args[i:]...)
+			break
+		}
+		if arg == "--repo-dir" {
+			if i+1 >= len(args) || args[i+1] == "" {
+				return c, nil, errors.New("--repo-dir requires a directory")
+			}
+			i++
+			c.Dir = args[i]
+			continue
+		}
+		if strings.HasPrefix(arg, "--repo-dir=") {
+			c.Dir = strings.TrimPrefix(arg, "--repo-dir=")
+			if c.Dir == "" {
+				return c, nil, errors.New("--repo-dir requires a directory")
+			}
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	if c.Dir != "" {
+		absolute, err := filepath.Abs(c.Dir)
+		if err != nil {
+			return c, nil, err
+		}
+		c.Dir = absolute
+	}
+	return c, filtered, nil
 }
 func (c Runner) load() (contract.Repository, contract.Manifest, error) {
 	rp, mp, _ := c.paths()

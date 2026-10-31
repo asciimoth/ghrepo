@@ -21,7 +21,20 @@ ghrepo publish --dry-run
 ghrepo publish --message 'chore(repo): publish signed metadata'
 ```
 
-Run these commands from the repository directory. `add` updates only
+Run these commands from the repository directory, or set `GHREPO_REPO_DIR` to
+its local path. Use `--repo-dir DIR` to select a repository for one command;
+this option takes priority over the environment variable. For example, from a
+project directory:
+
+```sh
+export GHREPO_REPO_DIR=/home/user/myrepo
+ghrepo add --upload ./myproject.deb
+ghrepo --repo-dir /home/user/otherrepo add --upload ./myproject.deb
+```
+
+Package file paths stay relative to the current directory. Repository files,
+cache, metadata, and Git operations use the selected repository directory.
+`init --repo` still specifies the GitHub repository URL. `add` updates only
 `packages.yaml` and the ignored verified cache. `source set` verifies the new
 URL against the stored size and SHA-256 before it changes the manifest. `remove`
 marks an entry as retained. These commands do not publish or push. The `rebuild`

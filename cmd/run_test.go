@@ -16,6 +16,38 @@ import (
 
 type fixtureFetcher struct{ data map[string][]byte }
 
+func TestRepositoryDirectorySelection(t *testing.T) {
+	ctx := context.Background()
+	envDir := t.TempDir()
+	flagDir := t.TempDir()
+	t.Setenv("GHREPO_REPO_DIR", envDir)
+	runner := Runner{}
+	if err := runner.Run(ctx, []string{"init", "--repo", "example/env"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"--repo-dir", flagDir, "init", "--repo", "example/flag"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"sync"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"sync", "--repo-dir=" + flagDir}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ dir, want string }{{envDir, "https://github.com/example/env"}, {flagDir, "https://github.com/example/flag"}} {
+		repo, err := contract.ReadRepository(filepath.Join(tc.dir, "ghrepo.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if repo.Repository.URL != tc.want {
+			t.Fatalf("repository in %s is %s; want %s", tc.dir, repo.Repository.URL, tc.want)
+		}
+	}
+	if err := runner.Run(ctx, []string{"--repo-dir"}); err == nil {
+		t.Fatal("accepted missing repository directory")
+	}
+}
+
 func TestInitRepoAndSiteURLs(t *testing.T) {
 	tests := []struct {
 		name  string

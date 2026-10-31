@@ -35,7 +35,8 @@ func TestGitHubCommandsOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := filepath.Join(dir, "input.deb")
+	project := t.TempDir()
+	source := filepath.Join(project, "input.deb")
 	if err := os.WriteFile(source, packageBytes, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,14 @@ func TestGitHubCommandsOffline(t *testing.T) {
 	if err := contract.WriteManifest(filepath.Join(dir, "packages.yaml"), contract.Manifest{Schema: 1, Packages: []contract.Package{upstream}}, repo); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Run(ctx, []string{"add", "--upload", source}); err != nil {
+	t.Chdir(project)
+	relativeRepo, err := filepath.Rel(project, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GHREPO_REPO_DIR", relativeRepo)
+	c.Dir = ""
+	if err := c.Run(ctx, []string{"add", "--upload", "input.deb"}); err != nil {
 		t.Fatal(err)
 	}
 	manifest, err := contract.ReadManifest(filepath.Join(dir, "packages.yaml"), repo)
@@ -161,9 +169,11 @@ func TestGitHubCommandsOffline(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(progressDir, digest+".json"), record, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Run(ctx, []string{"add", "--upload", source}); err != nil {
+	t.Setenv("GHREPO_REPO_DIR", project)
+	if err := c.Run(ctx, []string{"add", "--repo-dir", dir, "--upload", "input.deb"}); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("GHREPO_REPO_DIR", relativeRepo)
 	if uploadCalls != 1 {
 		t.Fatalf("resume uploaded again: %d calls", uploadCalls)
 	}
