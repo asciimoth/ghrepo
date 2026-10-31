@@ -1,0 +1,4 @@
+FROM almalinux:9
+
+RUN dnf -y install dnf-plugins-core gnupg2 rpm \
+    && dnf clean all

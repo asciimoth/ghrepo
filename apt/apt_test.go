@@ -22,9 +22,15 @@ import (
 func fixture(t *testing.T) (string, string, contract.Repository, contract.Manifest, contract.Local, string) {
 	t.Helper()
 	if _, err := exec.LookPath("gpg"); err != nil {
+		if os.Getenv("GHREPO_APT_INSTALL") == "1" {
+			t.Fatal("gpg is required for the container compatibility test")
+		}
 		t.Skip("gpg is unavailable")
 	}
 	if _, err := exec.LookPath("gpgv"); err != nil {
+		if os.Getenv("GHREPO_APT_INSTALL") == "1" {
+			t.Fatal("gpgv is required for the container compatibility test")
+		}
 		t.Skip("gpgv is unavailable")
 	}
 	root := t.TempDir()
@@ -283,6 +289,9 @@ func TestControlFieldsKeepDependenciesAndRejectIndexOverrides(t *testing.T) {
 
 func TestAPTClientCompatibility(t *testing.T) {
 	if _, err := exec.LookPath("apt-get"); err != nil {
+		if os.Getenv("GHREPO_APT_INSTALL") == "1" {
+			t.Fatal("apt-get is required for the container compatibility test")
+		}
 		t.Skip("apt-get is unavailable")
 	}
 	root, key, r, m, local, cacheRoot := fixture(t)
@@ -300,6 +309,10 @@ func TestAPTClientCompatibility(t *testing.T) {
 	}
 	if err := os.WriteFile(pkgPath, pkg, 0644); err != nil {
 		t.Fatal(err)
+	}
+	field := exec.Command("dpkg-deb", "--field", pkgPath, "Package")
+	if output, err := field.CombinedOutput(); err != nil || strings.TrimSpace(string(output)) != m.Packages[0].Identity.Name {
+		t.Fatalf("dpkg-deb could not read package: %v: %s", err, output)
 	}
 	server := httptest.NewServer(http.FileServer(http.Dir(root)))
 	defer server.Close()
@@ -320,6 +333,9 @@ func TestAPTClientCompatibility(t *testing.T) {
 		cmd := exec.Command("apt-get", args...)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			if strings.Contains(string(output), "Unable to determine a suitable packaging system type") {
+				if os.Getenv("GHREPO_APT_INSTALL") == "1" {
+					t.Fatalf("APT has no usable packaging backend: %s", output)
+				}
 				t.Skip("APT has no usable packaging backend")
 			}
 			t.Fatalf("apt-get %v: %v: %s", action, err, output)

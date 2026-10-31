@@ -20,6 +20,9 @@ func fixture(t *testing.T) (string, string, string, contract.Repository, contrac
 	t.Helper()
 	for _, tool := range []string{"gpg", "gpgv"} {
 		if _, err := exec.LookPath(tool); err != nil {
+			if os.Getenv("GHREPO_RPM_INSTALL") == "1" {
+				t.Fatal(tool + " is required for the container compatibility test")
+			}
 			t.Skip(tool + " unavailable")
 		}
 	}

@@ -19,6 +19,9 @@ import (
 func TestCompatibility(t *testing.T) {
 	for _, tool := range []string{"rpm"} {
 		if _, err := exec.LookPath(tool); err != nil {
+			if os.Getenv("GHREPO_RPM_INSTALL") == "1" {
+				t.Fatal(tool + " is required for the container compatibility test")
+			}
 			t.Skip(tool + " unavailable")
 		}
 	}
@@ -26,6 +29,9 @@ func TestCompatibility(t *testing.T) {
 	if _, err := exec.LookPath(dnfTool); err != nil {
 		dnfTool = "dnf5"
 		if _, err := exec.LookPath(dnfTool); err != nil {
+			if os.Getenv("GHREPO_RPM_INSTALL") == "1" {
+				t.Fatal("DNF is required for the container compatibility test")
+			}
 			t.Skip("DNF unavailable")
 		}
 	}
@@ -60,6 +66,14 @@ func TestCompatibility(t *testing.T) {
 		}
 		if err := os.WriteFile(filepath.Join(site, p.Path), raw, 0644); err != nil {
 			t.Fatal(err)
+		}
+	}
+	for _, p := range m.Packages {
+		cmd := exec.Command("rpm", "--query", "--package", "--queryformat", "%{NAME} %{VERSION}-%{RELEASE} %{ARCH}", filepath.Join(site, p.Path))
+		output, err := cmd.CombinedOutput()
+		want := p.Identity.Name + " " + p.Identity.Version + "-" + p.Identity.Release + " " + p.Identity.Architecture
+		if err != nil || string(output) != want {
+			t.Fatalf("rpm could not read %s: %v: %s", p.Path, err, output)
 		}
 	}
 	metadata := filepath.Join(root, "metadata")

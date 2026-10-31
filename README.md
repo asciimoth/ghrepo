@@ -41,3 +41,12 @@ verification. It does not need a private key or package-management tools. A
 failed build keeps the previous `build/site/` directory. The artifact also
 contains the rendered landing page, setup notes, download script, and APT and
 RPM client files from the committed templates.
+
+## Docker compatibility tests
+
+Run `just test-e2e` with Docker available. The test builds Linux test binaries
+and runs the generated repositories through APT and `dpkg` in Debian, and DNF
+and `rpm` in AlmaLinux. It checks repository refresh, package download, and
+installation. The RPM test also checks both package signature policies. Docker
+downloads the images and their test tools on the first run. The normal
+`just test` command does not require Docker.

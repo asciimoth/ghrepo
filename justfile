@@ -1,7 +1,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # Run all project checks.
-check: tidy typos fmt lint vet test fuzz
+check: tidy typos fmt lint vet test test-e2e fuzz
 
 # Update the Go module files.
 tidy:
@@ -31,6 +31,10 @@ vet:
 # Run all tests with the race detector and coverage measurement.
 test:
     go test -race -cover ./...
+
+# Check generated repositories with APT, DNF, and RPM in Docker.
+test-e2e:
+    bash tests/e2e/docker/run.sh
 
 # Run each Go fuzz target. The duration applies to each target.
 fuzz fuzztime=env_var_or_default('FUZZ_TIME', '5s') fuzzparallel=env_var_or_default('FUZZ_PARALLEL', '2'):
