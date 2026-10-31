@@ -196,3 +196,34 @@ acceptance gate.
 **Done when:** offline tests cover the GitHub adapter and command flow,
 including failed uploads and downloads, duplicate assets, bucket rollover, Pages
 configuration, and secret exclusion. Manual GitHub checks are optional.
+
+## 8. Close the remaining retention and reproducibility gaps
+
+Implement `ghrepo prune` for retained packages. Remove a manifest entry only
+after `site.retention_days` has elapsed since `retained_at` and no retained
+signed index or rollback reference needs its served path. Keep pruning separate
+from `remove`, and show which entries are eligible before changing the manifest.
+Test the retention boundary, rollback references, and site output after pruning.
+
+Add an explicit replacement operation for a package with the same identity but
+different bytes. Inspect and verify the new bytes, assign a new content-qualified
+served path, and retain the old path for clients with cached indexes. Update the
+manifest rules so one active entry and a retained prior entry can share an
+identity without allowing two active entries. Test replacement and rollback for
+both DEB and RPM packages.
+
+Track when each checksum-named RPM metadata file entered the repository. Keep
+old files for at least the configured retention period, then remove files that
+are no longer referenced by the current `repomd.xml` or a protected rollback
+state. Do not use local file modification times as the retention record. Test
+the age boundary, checksum checks, and Git staging of expired file deletions.
+
+Pin the site builder used by the generated Pages workflow to an immutable tool
+revision, or build it from the checked-out source when that source is present.
+The workflow must build the triggering repository commit with a known builder
+version, without fetching the moving `main` branch of `ghrepo`. Test the
+generated workflow and a rebuild of the same commit after `main` changes.
+
+**Done when:** pruning and replacement preserve all required old package paths,
+expired RPM metadata leaves the site only after its retention window, and the
+same committed inputs use the same builder revision on every workflow rerun.
