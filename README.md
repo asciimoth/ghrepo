@@ -2,6 +2,33 @@
 
 Tool for hosting DEB and RPM repositories on GitHub Pages.
 
+## Set up a new GitHub repository
+
+Before you run `ghrepo init` for a repository you created on GitHub:
+
+1. Create a **public** repository. Use `main` as its default branch, or pass its
+   branch name to `ghrepo init --branch`.
+1. In **Settings → Pages → Build and deployment**, set **Source** to **GitHub
+   Actions**. See [GitHub's Pages instructions][pages-source]. Make sure GitHub
+   Actions can run in the repository.
+1. Clone the repository and enter its directory. Set up Git authentication so
+   you can push to `origin`.
+1. Create or select a local GPG signing key. Find its ID with
+   `gpg --list-secret-keys --keyid-format LONG`. `ghrepo init` exports its
+   public key, and `ghrepo publish` uses it to sign repository metadata.
+
+```sh
+git clone https://github.com/OWNER/REPO.git
+cd REPO
+ghrepo init --repo OWNER/REPO --key-id KEY_ID
+```
+
+Replace `OWNER`, `REPO`, and `KEY_ID` with your values. The generated Pages
+workflow starts after you publish to the selected branch. For a repository that
+does not exist yet, pass `--create-remote` and `--configure-pages` to `init` to
+create it and select GitHub Actions for Pages. Set `GH_TOKEN` for those API
+calls.
+
 ## Local manifest commands
 
 Build the `ghrepo` binary with `just build`, or run a command from the source
@@ -206,3 +233,5 @@ and `rpm` in AlmaLinux. It checks repository refresh, package download, and
 installation. The RPM test also checks both package signature policies. Docker
 downloads the images and their test tools on the first run. The normal
 `just test` command does not require Docker.
+
+[pages-source]: https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site#publishing-with-a-custom-github-actions-workflow
