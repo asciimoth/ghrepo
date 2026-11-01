@@ -6,8 +6,8 @@ Tool for hosting DEB and RPM repositories on GitHub Pages.
 
 Before you run `ghrepo init` for a repository you created on GitHub:
 
-1. Create a **public** repository. Use `main` as its default branch, or pass its
-   branch name to `ghrepo init --branch`.
+1. Create a **public** repository. `ghrepo init` uses the checked out branch by
+   default. Pass `--branch` to select a different branch.
 1. In **Settings → Pages → Build and deployment**, set **Source** to **GitHub
    Actions**. See [GitHub's Pages instructions][pages-source]. Make sure GitHub
    Actions can run in the repository.

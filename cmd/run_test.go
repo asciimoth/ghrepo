@@ -79,6 +79,40 @@ func TestInitRepoAndSiteURLs(t *testing.T) {
 	}
 }
 
+func TestInitBranch(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		initGit bool
+		branch  string
+		want    string
+	}{
+		{name: "current branch", initGit: true, want: "release"},
+		{name: "explicit branch", initGit: true, branch: "publish", want: "publish"},
+		{name: "new repository", want: "main"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tt.initGit {
+				command(t, dir, "git", "init", "-b", "release")
+			}
+			args := []string{"init", "--repo", "example/packages"}
+			if tt.branch != "" {
+				args = append(args, "--branch", tt.branch)
+			}
+			if err := (Runner{Dir: dir}).Run(context.Background(), args); err != nil {
+				t.Fatal(err)
+			}
+			r, err := contract.ReadRepository(filepath.Join(dir, "ghrepo.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Repository.Branch != tt.want {
+				t.Fatalf("branch = %q; want %q", r.Repository.Branch, tt.want)
+			}
+		})
+	}
+}
+
 func TestInitRejectsInvalidShortRepo(t *testing.T) {
 	runner := Runner{Dir: t.TempDir()}
 	if err := runner.Run(context.Background(), []string{"init", "--repo", "example/../packages"}); err == nil {

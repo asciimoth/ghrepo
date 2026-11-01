@@ -241,7 +241,7 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	fs.SetOutput(io.Discard)
 	repo := fs.String("repo", "", "GitHub repository as user/repo or HTTPS URL")
 	siteURL := fs.String("site", "", "site HTTPS base URL (updates existing repositories)")
-	branch := fs.String("branch", "main", "")
+	branch := fs.String("branch", "", "")
 	sourceHosts := fs.String("source-hosts", "github.com", "")
 	redirectHosts := fs.String("redirect-hosts", "release-assets.githubusercontent.com,objects.githubusercontent.com", "")
 	keyID := fs.String("key-id", "", "")
@@ -257,9 +257,13 @@ func (c Runner) init(ctx context.Context, args []string) error {
 		return errors.New("usage: ghrepo init [DIR] --repo USER/REPO [--site URL]")
 	}
 	siteSet := false
+	branchSet := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "site" {
 			siteSet = true
+		}
+		if f.Name == "branch" {
+			branchSet = true
 		}
 	})
 	dir := c.root()
@@ -282,6 +286,19 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	} else {
 		if *repo == "" {
 			return errors.New("init requires --repo")
+		}
+		if !branchSet {
+			*branch = "main"
+			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+				command := exec.CommandContext(ctx, "git", "-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+				output, err := command.Output()
+				if err != nil {
+					return errors.New("cannot determine current Git branch; set --branch")
+				}
+				*branch = strings.TrimSpace(string(output))
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
 		}
 		repoURL, defaultSite, err := initURLs(*repo)
 		if err != nil {
