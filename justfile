@@ -37,6 +37,10 @@ test:
 test-e2e:
     bash tests/e2e/docker/run.sh
 
+# Run the disposable live GitHub Pages test (requires GPG approval).
+test-github:
+    bash tests/e2e/github/run.sh
+
 # Run each Go fuzz target. The duration applies to each target.
 fuzz fuzztime=env_var_or_default('FUZZ_TIME', '5s') fuzzparallel=env_var_or_default('FUZZ_PARALLEL', '2'):
     @found=0; \

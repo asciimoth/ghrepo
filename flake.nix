@@ -77,6 +77,9 @@
           golangci-lint
           gopls
 
+          gh
+          python3
+
           typos
           commitizen
           just
