@@ -339,10 +339,14 @@ func TestInitExportsConfiguredPublicKeyWithoutReplacingIt(t *testing.T) {
 	}
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
 	dir := t.TempDir()
-	runner := Runner{Dir: dir}
+	var output bytes.Buffer
+	runner := Runner{Dir: dir, Out: &output}
 	ctx := context.Background()
 	if err := runner.Run(ctx, []string{"init", "--repo", "https://github.com/example/repo", "--site", "https://example.github.io/repo", "--key-id", "TESTKEY"}); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "GPG key: TESTKEY") {
+		t.Fatalf("explicit key output: %q", output.String())
 	}
 	key := filepath.Join(dir, "KEY.gpg")
 	if string(mustRead(t, key)) != "public-key-bytes" {
@@ -359,6 +363,84 @@ func TestInitExportsConfiguredPublicKeyWithoutReplacingIt(t *testing.T) {
 	}
 }
 
+func TestInitSelectsFirstLocalSigningKey(t *testing.T) {
+	tools := t.TempDir()
+	program := filepath.Join(tools, "gpg")
+	script := `#!/bin/sh
+case "$*" in
+  *--list-secret-keys*)
+    printf 'sec:u:2048:1:ENCRYPT:0:0:::::e:\nfpr:::::::::ENCRYPTFINGERPRINT:\nsec:u:2048:1:SIGN:0:0:::::sc:\nfpr:::::::::SIGNFINGERPRINT:\n'
+    ;;
+  *--list-keys*)
+    printf 'pub:u:2048:1:SIGN:0:0:::::sc:\nfpr:::::::::SIGNFINGERPRINT:\nuid:u::::::::Alice Example <alice@example.org>:\n'
+    ;;
+  *--export*) printf 'public-key-bytes' ;;
+esac
+`
+	if err := os.WriteFile(program, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+	clearTestEnv(t, "GHREPO_GPG_KEY_ID")
+	dir := t.TempDir()
+	var output bytes.Buffer
+	runner := Runner{Dir: dir, Out: &output}
+	if err := runner.Run(context.Background(), []string{"init", "--dry-run", "--repo", "example/repo"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "GPG key: SIGNFINGERPRINT (Alice Example <alice@example.org>)") {
+		t.Fatalf("dry-run key output: %q", output.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".ghrepo.local.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry run wrote local configuration: %v", err)
+	}
+	output.Reset()
+	if err := runner.Run(context.Background(), []string{"init", "--repo", "example/repo"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "GPG key: SIGNFINGERPRINT (Alice Example <alice@example.org>)") {
+		t.Fatalf("key output: %q", output.String())
+	}
+	local, err := contract.ReadLocal(filepath.Join(dir, ".ghrepo.local.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local.GPG.KeyID != "SIGNFINGERPRINT" {
+		t.Fatalf("selected key: %q", local.GPG.KeyID)
+	}
+	if got := string(mustRead(t, filepath.Join(dir, "KEY.gpg"))); got != "public-key-bytes" {
+		t.Fatalf("exported key: %q", got)
+	}
+}
+
+func TestInitDryRunShowsExplicitKeyWithoutWriting(t *testing.T) {
+	tools := t.TempDir()
+	program := filepath.Join(tools, "gpg")
+	script := `#!/bin/sh
+case "$*" in
+  *--list-keys*) printf 'pub:u:2048:1:EXPLICIT:0:0:::::sc:\nfpr:::::::::EXPLICITFINGERPRINT:\nuid:u::::::::Bob Example <bob@example.org>:\n' ;;
+  *) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(program, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+	clearTestEnv(t, "GHREPO_GPG_KEY_ID")
+	dir := t.TempDir()
+	var output bytes.Buffer
+	runner := Runner{Dir: dir, Out: &output}
+	if err := runner.Run(context.Background(), []string{"init", "--dry-run", "--repo", "example/repo", "--key-id", "EXPLICIT"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "GPG key: EXPLICITFINGERPRINT (Bob Example <bob@example.org>)") {
+		t.Fatalf("dry-run key output: %q", output.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".ghrepo.local.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry run wrote local configuration: %v", err)
+	}
+}
+
 func TestInitExportsEffectivePublicKey(t *testing.T) {
 	tools := t.TempDir()
 	program := filepath.Join(tools, "gpg")
@@ -367,7 +449,8 @@ func TestInitExportsEffectivePublicKey(t *testing.T) {
 	}
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
 	dir := t.TempDir()
-	runner := Runner{Dir: dir}
+	var output bytes.Buffer
+	runner := Runner{Dir: dir, Out: &output}
 	ctx := context.Background()
 	init := []string{"init", "--repo", "https://github.com/example/repo", "--site", "https://example.github.io/repo"}
 	if err := runner.Run(ctx, init); err != nil {
@@ -388,16 +471,23 @@ func TestInitExportsEffectivePublicKey(t *testing.T) {
 	if got := string(mustRead(t, key)); got != "ENVKEY|/env-home" {
 		t.Fatalf(".env key selection: %q", got)
 	}
+	if !strings.Contains(output.String(), "GPG key: ENVKEY") {
+		t.Fatalf(".env key output: %q", output.String())
+	}
 	if err := os.Remove(key); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GHREPO_GPG_KEY_ID", "PROCESSKEY")
 	t.Setenv("GHREPO_GPG_HOME", "/process-home")
+	output.Reset()
 	if err := runner.Run(ctx, []string{"init"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := string(mustRead(t, key)); got != "PROCESSKEY|/process-home" {
 		t.Fatalf("process key selection: %q", got)
+	}
+	if !strings.Contains(output.String(), "GPG key: PROCESSKEY") {
+		t.Fatalf("process key output: %q", output.String())
 	}
 }
 
@@ -408,4 +498,19 @@ func mustRead(t *testing.T, name string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func clearTestEnv(t *testing.T, name string) {
+	t.Helper()
+	value, exists := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if exists {
+			_ = os.Setenv(name, value)
+		} else {
+			_ = os.Unsetenv(name)
+		}
+	})
 }

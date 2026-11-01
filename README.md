@@ -13,21 +13,27 @@ Before you run `ghrepo init` for a repository you created on GitHub:
    Actions can run in the repository.
 1. Clone the repository and enter its directory. Set up Git authentication so
    you can push to `origin`.
-1. Create or select a local GPG signing key. Find its ID with
-   `gpg --list-secret-keys --keyid-format LONG`. `ghrepo init` exports its
-   public key, and `ghrepo publish` uses it to sign repository metadata.
+1. Create or select a local GPG signing key. If you omit `--key-id`,
+   `ghrepo init` selects the first signing secret key listed by GPG and saves
+   its fingerprint in `.ghrepo.local.yaml`. To select another key, find its ID
+   with `gpg --list-secret-keys --keyid-format LONG` and pass `--key-id`.
+   `ghrepo init` exports the selected public key, and `ghrepo publish` uses the
+   selected key to sign repository metadata.
 
 ```sh
 git clone https://github.com/OWNER/REPO.git
 cd REPO
-ghrepo init --repo OWNER/REPO --key-id KEY_ID
+ghrepo init --repo OWNER/REPO
 ```
 
-Replace `OWNER`, `REPO`, and `KEY_ID` with your values. The generated Pages
-workflow starts after you publish to the selected branch. For a repository that
-does not exist yet, pass `--create-remote` and `--configure-pages` to `init` to
-create it and select GitHub Actions for Pages. Set `GH_TOKEN` for those API
-calls.
+`init` prints the chosen key fingerprint and its first GPG user ID. It also
+prints the key during `--dry-run`. If GPG cannot provide key details, it prints
+the configured key ID.
+
+Replace `OWNER` and `REPO` with your values. The generated Pages workflow starts
+after you publish to the selected branch. For a repository that does not exist
+yet, pass `--create-remote` and `--configure-pages` to `init` to create it and
+select GitHub Actions for Pages. Set `GH_TOKEN` for those API calls.
 
 ## Local manifest commands
 

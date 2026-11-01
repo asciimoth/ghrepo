@@ -327,8 +327,16 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
+	configured, selectedKey, err := initSigningKey(ctx, dir, *keyID)
+	if err != nil {
+		return err
+	}
+	keyInfo := describeGPGKey(ctx, configured.GPG.Home, configured.GPG.Keyring, configured.GPG.KeyID)
 	if c.dryRun {
-		return c.preview("would initialize repository in %s (remote creation: %t, Pages configuration: %t)", dir, *createRemote, *configurePages)
+		if err := c.preview("would initialize repository in %s (remote creation: %t, Pages configuration: %t)", dir, *createRemote, *configurePages); err != nil {
+			return err
+		}
+		return c.preview("GPG key: %s", keyInfo)
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -386,12 +394,8 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	}, 0644); err != nil {
 		return err
 	}
-	configured, err := contract.LoadEffectiveLocal(filepath.Join(dir, ".ghrepo.local.yaml"), processEnv())
-	if err != nil {
-		return err
-	}
+	keyPath := filepath.Join(dir, "KEY.gpg")
 	if configured.GPG.KeyID != "" {
-		keyPath := filepath.Join(dir, "KEY.gpg")
 		if _, err := os.Lstat(keyPath); errors.Is(err, os.ErrNotExist) {
 			args := []string{"--batch"}
 			if configured.GPG.Keyring != "" {
@@ -413,6 +417,16 @@ func (c Runner) init(ctx context.Context, args []string) error {
 				return err
 			}
 		} else if err != nil {
+			return err
+		}
+	}
+	if selectedKey != "" {
+		local, err := contract.ReadLocal(filepath.Join(dir, ".ghrepo.local.yaml"))
+		if err != nil {
+			return err
+		}
+		local.GPG.KeyID = selectedKey
+		if err := contract.WriteLocal(filepath.Join(dir, ".ghrepo.local.yaml"), local); err != nil {
 			return err
 		}
 	}
@@ -452,9 +466,123 @@ func (c Runner) init(ctx context.Context, args []string) error {
 		}
 	}
 	if existingRepository && siteSet && r.Site != originalSite {
-		return contract.WriteRepository(rp, r)
+		if err := contract.WriteRepository(rp, r); err != nil {
+			return err
+		}
 	}
-	return nil
+	return c.preview("GPG key: %s", keyInfo)
+}
+
+func initSigningKey(ctx context.Context, dir, keyID string) (contract.Local, string, error) {
+	name := filepath.Join(dir, ".ghrepo.local.yaml")
+	local := contract.Local{Schema: 1}
+	if _, err := os.Lstat(name); err == nil {
+		local, err = contract.LoadEffectiveLocal(name, processEnv())
+		if err != nil {
+			return contract.Local{}, "", err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return contract.Local{}, "", err
+	} else {
+		local.GPG.KeyID = keyID
+		local = contract.EffectiveLocal(local, nil, processEnv())
+	}
+	if err := local.Validate(); err != nil {
+		return contract.Local{}, "", err
+	}
+	if local.GPG.KeyID != "" {
+		return local, "", nil
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "KEY.gpg")); err == nil {
+		return local, "", nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return contract.Local{}, "", err
+	}
+	selected, err := defaultSigningKey(ctx, local.GPG.Home, local.GPG.Keyring)
+	if err != nil {
+		return contract.Local{}, "", err
+	}
+	local.GPG.KeyID = selected
+	return local, selected, nil
+}
+
+func describeGPGKey(ctx context.Context, home, keyring, keyID string) string {
+	if keyID == "" {
+		return "none"
+	}
+	args := []string{"--batch", "--with-colons", "--fingerprint"}
+	if keyring != "" {
+		args = append(args, "--no-default-keyring", "--keyring", keyring)
+	}
+	args = append(args, "--list-keys", keyID)
+	command := exec.CommandContext(ctx, "gpg", args...)
+	if home != "" {
+		command.Env = append(os.Environ(), "GNUPGHOME="+home)
+	}
+	data, err := command.Output()
+	if err != nil {
+		return keyID
+	}
+	fingerprint, identity := "", ""
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) < 10 {
+			continue
+		}
+		switch fields[0] {
+		case "fpr":
+			if fingerprint == "" {
+				fingerprint = fields[9]
+			}
+		case "uid":
+			if identity == "" {
+				identity = fields[9]
+			}
+		}
+	}
+	if fingerprint != "" {
+		keyID = fingerprint
+	}
+	if identity != "" {
+		return keyID + " (" + identity + ")"
+	}
+	return keyID
+}
+
+func defaultSigningKey(ctx context.Context, home, keyring string) (string, error) {
+	args := []string{"--batch", "--with-colons", "--fingerprint"}
+	if keyring != "" {
+		args = append(args, "--no-default-keyring", "--keyring", keyring)
+	}
+	args = append(args, "--list-secret-keys")
+	command := exec.CommandContext(ctx, "gpg", args...)
+	if home != "" {
+		command.Env = append(os.Environ(), "GNUPGHOME="+home)
+	}
+	data, err := command.Output()
+	if errors.Is(err, exec.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", errors.New("cannot list local GPG secret keys")
+	}
+	wantFingerprint := false
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) == 0 {
+			continue
+		}
+		switch fields[0] {
+		case "sec":
+			wantFingerprint = len(fields) > 11 && !strings.ContainsAny(fields[1], "red") && strings.ContainsAny(fields[11], "sS")
+		case "fpr":
+			if wantFingerprint && len(fields) > 9 && fields[9] != "" {
+				return fields[9], nil
+			}
+			wantFingerprint = false
+		}
+	}
+	return "", nil
 }
 func splitList(s string) []string {
 	if s == "" {

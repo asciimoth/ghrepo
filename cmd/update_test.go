@@ -42,6 +42,7 @@ func TestUpdateGitHubRelease(t *testing.T) {
 	if err := c.Run(ctx, []string{"add", oldURL}); err != nil {
 		t.Fatal(err)
 	}
+	output.Reset()
 	manifestPath := filepath.Join(dir, "packages.yaml")
 	before, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -156,6 +157,7 @@ func TestUpdateRejectsOtherPackage(t *testing.T) {
 	if err := c.Run(ctx, []string{"add", oldURL}); err != nil {
 		t.Fatal(err)
 	}
+	output.Reset()
 	manifestPath := filepath.Join(dir, "packages.yaml")
 	before, err := os.ReadFile(manifestPath)
 	if err != nil {
