@@ -4,6 +4,9 @@ Host signed DEB and RPM package repositories on GitHub Pages. Add packages from
 public HTTPS URLs or upload local files to GitHub Releases, then publish APT and
 DNF metadata and a packages page.
 
+See [repo.moth.contact](https://repo.moth.contact/) for a live repository built
+with ghrepo. It also publishes ghrepo DEB and RPM packages.
+
 - [Install](#install)
 - [Quick start](#quick-start)
 - [Manage packages](#manage-packages)
@@ -14,6 +17,30 @@ DNF metadata and a packages page.
 - [License](#license)
 
 ## Install
+
+Install ghrepo from [repo.moth.contact](https://repo.moth.contact/):
+
+### Debian and Ubuntu (APT)
+
+```sh
+curl -fsSLo KEY.gpg "https://repo.moth.contact/KEY.gpg"
+sudo install -m 0644 KEY.gpg /usr/share/keyrings/ghrepo-archive-keyring.gpg
+curl -fsSLo deb.list "https://repo.moth.contact/deb.list"
+sudo install -m 0644 deb.list /etc/apt/sources.list.d/ghrepo.list
+sudo apt update
+sudo apt install ghrepo
+```
+
+### Fedora and other DNF systems (RPM)
+
+```sh
+curl -fsSLo rpm.repo "https://repo.moth.contact/rpm.repo"
+sudo install -m 0644 rpm.repo /etc/yum.repos.d/ghrepo.repo
+sudo dnf makecache
+sudo dnf install ghrepo
+```
+
+### Nix
 
 Install the CLI with Nix:
 
