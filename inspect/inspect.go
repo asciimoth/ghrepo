@@ -205,6 +205,10 @@ func deb(data []byte) (Metadata, error) {
 	}
 	for key, value := range fields {
 		if strings.Trim(value, " \t\n") == "" {
+			if strings.EqualFold(key, "Section") {
+				delete(fields, key)
+				continue
+			}
 			return Metadata{}, fmt.Errorf("empty DEB control field %s", key)
 		}
 	}

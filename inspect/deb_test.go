@@ -228,6 +228,14 @@ func TestDEBControlFieldsCompatibility(t *testing.T) {
 	}
 }
 
+func TestDEBEmptySectionCompatibility(t *testing.T) {
+	control := testControl + "Section: \nArchitecture-Variant: amd64v1\n"
+	meta := requireDEBMetadata(t, testDEBEntries(t, []tarEntry{regularEntry("control", control)}))
+	if _, ok := meta.Fields["Section"]; ok {
+		t.Fatal("empty optional section was copied to package metadata")
+	}
+}
+
 func TestDEBControlFieldsRejectInvalid(t *testing.T) {
 	cases := map[string]string{
 		"duplicate":      testControl + "Package: other\n",

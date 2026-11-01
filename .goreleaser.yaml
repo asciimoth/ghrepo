@@ -30,6 +30,7 @@ nfpms:
     maintainer: asciimoth <asciimoth@users.noreply.github.com>
     homepage: https://github.com/asciimoth/ghrepo
     description: Tool for hosting DEB and RPM repositories on GitHub Pages.
+    section: utils
     license: GPL-3.0-only
     bindir: /usr/bin
     formats:

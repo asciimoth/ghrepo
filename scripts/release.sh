@@ -8,7 +8,7 @@ if [[ ! $tag =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.
   exit 1
 fi
 
-for tool in git just goreleaser gpg; do
+for tool in git just goreleaser gpg go; do
   command -v "$tool" >/dev/null || { printf '%s is required.\n' "$tool" >&2; exit 1; }
 done
 if [[ -n ${GHREPO_REPO_DIR:-} ]]; then
@@ -55,6 +55,7 @@ fi
 
 # Build and sign every asset before the tag is pushed.
 goreleaser release --snapshot --clean --skip=publish
+go run ./scripts/check-release-packages.go
 
 git push origin HEAD
 git tag -a "$tag" -m "Release $tag"
