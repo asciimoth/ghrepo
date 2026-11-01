@@ -61,6 +61,10 @@ fuzz fuzztime=env_var_or_default('FUZZ_TIME', '5s') fuzzparallel=env_var_or_defa
 build:
     go build -o ghrepo .
 
+# Run checks, create and push a version tag, then publish signed assets.
+release version:
+    bash scripts/release.sh {{ quote(version) }}
+
 # Run ghrepo with the supplied CLI arguments.
 run *args:
     go run . "$@"

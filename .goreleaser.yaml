@@ -1,0 +1,63 @@
+version: 2
+
+project_name: ghrepo
+
+builds:
+  - id: ghrepo
+    main: .
+    binary: ghrepo
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - ids:
+      - ghrepo
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+nfpms:
+  - ids:
+      - ghrepo
+    package_name: ghrepo
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: ghrepo
+    maintainer: asciimoth <asciimoth@users.noreply.github.com>
+    homepage: https://github.com/asciimoth/ghrepo
+    description: Tool for hosting DEB and RPM repositories on GitHub Pages.
+    license: GPL-3.0-only
+    bindir: /usr/bin
+    formats:
+      - deb
+      - rpm
+    rpm:
+      signature:
+        key_file: "{{ .Env.GPG_KEY_FILE }}"
+    deb:
+      signature:
+        key_file: "{{ .Env.GPG_KEY_FILE }}"
+
+checksum:
+  name_template: checksums.txt
+
+signs:
+  - artifacts: all
+    args:
+      - --batch
+      - --yes
+      - --local-user
+      - "{{ .Env.GPG_KEY_ID }}"
+      - --output
+      - "${signature}"
+      - --detach-sign
+      - "${artifact}"
+
+release:
+  github:
+    owner: asciimoth
+    name: ghrepo

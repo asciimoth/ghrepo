@@ -13,6 +13,33 @@ nix profile install github:asciimoth/ghrepo
 The flake also provides `packages.<system>.ghrepo`, so you can run it without
 installing it with `nix run github:asciimoth/ghrepo -- --help`.
 
+## Make a release
+
+The release command builds Linux `amd64` and `arm64` binaries. GoReleaser makes
+`tar.gz`, DEB, and RPM files for each architecture. It signs the DEB and RPM
+packages with GPG, adds a detached GPG signature for each release artifact and
+the checksum file, and publishes them in a GitHub Release.
+
+Install the release tools with `nix develop`. Configure GitHub authentication
+with `GITHUB_TOKEN` or `GH_TOKEN` (the token needs `contents: write`), or sign
+in with `gh auth login`. Set `GPG_KEY_ID` to the fingerprint of a local GPG
+secret key. If the key has a passphrase, also set `NFPM_PASSPHRASE` so the DEB
+and RPM packagers can sign their packages. Do not commit these values or the
+secret key.
+
+Commit all changes, then run the command from the branch you want to release:
+
+```sh
+export GPG_KEY_ID=YOUR_KEY_FINGERPRINT
+just release 1.2.3
+```
+
+The command runs `just check` and a local signed snapshot build before it
+creates and pushes the `v1.2.3` tag. GoReleaser then uploads the signed files.
+The release stops if the working tree is not clean or the tag already exists.
+Verify a downloaded asset and its detached signature with
+`gpg --verify FILE.sig FILE`; import and trust the release public key first.
+
 ## Set up a new GitHub repository
 
 Before you run `ghrepo init` for a repository you created on GitHub:

@@ -105,6 +105,8 @@
           gopls
 
           gh
+          goreleaser
+          gnupg
           python3
 
           typos
