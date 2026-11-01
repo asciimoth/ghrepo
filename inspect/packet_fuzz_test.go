@@ -51,6 +51,18 @@ func TestSignaturePacketFuzzSeeds(t *testing.T) {
 // algorithm checks in inspect.rpm. The four tag choices cover header and
 // full-payload signatures for RSA and EdDSA.
 func FuzzRPMSignaturePacket(f *testing.F) {
+	for _, algo := range []byte{1, 3, 17, 19, 22} {
+		for _, digest := range []byte{2, 8, 9, 10, 11} {
+			for _, old := range []bool{false, true} {
+				choice := uint8(1)
+				if algo == 1 || algo == 3 {
+					choice = 0
+				}
+				f.Add(choice, signaturePacket(algo, digest, old))
+				f.Add(choice+2, signaturePacket(algo, digest, old))
+			}
+		}
+	}
 	for _, tc := range []struct {
 		tag    uint8
 		packet []byte
@@ -165,5 +177,109 @@ func TestDEBPacketFuzzSeeds(t *testing.T) {
 	payload := testGzip(t, testTar(t, tar.FormatUSTAR, []tarEntry{regularEntry("./payload", "payload")}))
 	if _, err := Bytes(testDEB(t, control, payload)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Exercise digest choices independently of trust policy, with both old and new
+// OpenPGP packet headers and each historical RPM signature tag.
+func TestRPMSignatureCompatibility(t *testing.T) {
+	for _, algo := range []byte{1, 3, 17, 19, 22} {
+		for _, digest := range []byte{2, 8, 9, 10, 11} {
+			for _, oldHeader := range []bool{false, true} {
+				for _, payload := range []bool{false, true} {
+					t.Run(fmt.Sprintf("algo=%d/hash=%d/old=%v/payload=%v", algo, digest, oldHeader, payload), func(t *testing.T) {
+						raw := signaturePacket(algo, digest, oldHeader)
+						tag := uint32(rpmutils.SIG_DSA)
+						if algo == 1 || algo == 3 {
+							tag = rpmutils.SIG_RSA
+						}
+						if payload {
+							if tag == rpmutils.SIG_RSA {
+								tag = rpmutils.SIG_PGP
+							} else {
+								tag = rpmutils.SIG_GPG
+							}
+						}
+						m, err := Bytes(testRPM(nil, &rpmTestTag{tag: rawSignatureTag(tag), kind: rpmutils.RPM_BIN_TYPE, count: uint32(len(raw)), data: raw}))
+						if err != nil || len(m.SignatureTags) != 1 {
+							t.Fatalf("metadata = %+v, error = %v", m, err)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func signaturePacket(algo, digest byte, oldHeader bool) []byte {
+	raw := bytes.Clone(eddsaPacket)
+	if algo == 1 || algo == 3 {
+		raw = bytes.Clone(rsaPacket)
+	}
+	raw[4], raw[5] = algo, digest
+	if oldHeader {
+		raw[0] = 0x88 // Old packet header, signature tag, one-byte length.
+	}
+	return raw
+}
+
+func TestRPMMalformedSignatures(t *testing.T) {
+	overlong := bytes.Clone(eddsaPacket)
+	overlong[1]++
+
+	for name, raw := range map[string][]byte{
+		"truncated":         eddsaPacket[:len(eddsaPacket)-1],
+		"trailing bytes":    append(bytes.Clone(eddsaPacket), 0),
+		"two packets":       append(bytes.Clone(eddsaPacket), eddsaPacket...),
+		"overlong packet":   overlong,
+		"wrong packet type": {0xcd, 1, 'x'},
+		"wrong tag family":  rsaPacket,
+		"unknown digest":    signaturePacket(22, 255, false),
+		"unknown algorithm": signaturePacket(255, 10, false),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Bytes(testRPM(nil, &rpmTestTag{tag: rpmutils.SIG_DSA, kind: rpmutils.RPM_BIN_TYPE, count: uint32(len(raw)), data: raw}))
+			if err == nil {
+				t.Fatal("accepted malformed or unsupported signature")
+			}
+		})
+	}
+}
+
+func TestRPMSignaturePacketLengths(t *testing.T) {
+	body := eddsaPacket[2:]
+	for name, prefix := range map[string][]byte{
+		"new short":         {0xc2, byte(len(body))},
+		"new long":          {0xc2, 255, 0, 0, 0, byte(len(body))},
+		"old short":         {0x88, byte(len(body))},
+		"old medium":        {0x89, 0, byte(len(body))},
+		"old long":          {0x8a, 0, 0, 0, byte(len(body))},
+		"old indeterminate": {0x8b},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := append(prefix, body...)
+			if _, err := Bytes(testRPM(nil, &rpmTestTag{tag: rpmutils.SIG_DSA, kind: rpmutils.RPM_BIN_TYPE, count: uint32(len(raw)), data: raw})); err != nil {
+				t.Fatal(err)
+			}
+			if name != "old indeterminate" {
+				for _, bad := range [][]byte{raw[:len(raw)-1], append(bytes.Clone(raw), 0)} {
+					if completeSignaturePacket(bad) {
+						t.Fatal("accepted a packet length mismatch")
+					}
+				}
+			}
+		})
+	}
+	for _, raw := range [][]byte{
+		{0xc2, 192}, {0xc2, 255, 0}, {0x89, 0}, {0x8a, 0},
+		{0xc2, 224, 0}, {0xc2, 255, 255, 255, 255, 255},
+	} {
+		if completeSignaturePacket(raw) {
+			t.Fatalf("accepted malformed framing: %x", raw)
+		}
+	}
+	// A two-byte new-format length is legal for bodies of at least 192 bytes.
+	if !completeSignaturePacket(append([]byte{0xc2, 192, 0}, make([]byte, 192)...)) {
+		t.Fatal("rejected two-byte packet length")
 	}
 }

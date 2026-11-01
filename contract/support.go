@@ -20,50 +20,62 @@ var (
 // CheckDEBFormat checks the supported archive envelope. It does not parse the
 // control fields or package payload; the package inspector does that later.
 func CheckDEBFormat(data []byte) error {
+	_, err := DEBMembers(data)
+	return err
+}
+
+// DEBMembers validates the ar envelope and returns the three required member
+// bodies as slices of data. It permits extension members as specified by deb(5).
+// Extension bodies are opaque, but their ar headers and lengths are checked.
+func DEBMembers(data []byte) ([3][]byte, error) {
+	var members [3][]byte
+	fail := func(err error) ([3][]byte, error) { return [3][]byte{}, err }
 	if len(data) < 8 || string(data[:8]) != "!<arch>\n" {
-		return ErrMalformedDEB
+		return fail(ErrMalformedDEB)
 	}
 	data = data[8:]
 	member := 0
 	for len(data) > 0 {
 		if len(data) < 60 || string(data[58:60]) != "`\n" {
-			return ErrMalformedDEB
+			return fail(ErrMalformedDEB)
 		}
 		name := strings.TrimSuffix(strings.TrimSpace(string(data[:16])), "/")
 		size, err := strconv.Atoi(strings.TrimSpace(string(data[48:58])))
-		if err != nil || size < 0 || size > len(data)-60 {
-			return ErrMalformedDEB
+		if err != nil || size < 0 || size > len(data)-60 || name == "" {
+			return fail(ErrMalformedDEB)
 		}
 		body := data[60 : 60+size]
-		switch member {
-		case 0:
-			if name != "debian-binary" || string(body) != "2.0\n" {
-				return fmt.Errorf("%w: invalid debian-binary member", ErrMalformedDEB)
+		extension := member > 0 && (member == 3 || strings.HasPrefix(name, "_"))
+		if !extension {
+			switch member {
+			case 0:
+				if name != "debian-binary" || string(body) != "2.0\n" {
+					return fail(fmt.Errorf("%w: invalid debian-binary member", ErrMalformedDEB))
+				}
+			case 1:
+				if name != "control.tar.gz" {
+					return fail(fmt.Errorf("%w: %s", ErrUnsupportedDEBCompression, name))
+				}
+			case 2:
+				if name != "data.tar.gz" {
+					return fail(fmt.Errorf("%w: %s", ErrUnsupportedDEBCompression, name))
+				}
 			}
-		case 1:
-			if name != "control.tar.gz" {
-				return fmt.Errorf("%w: %s", ErrUnsupportedDEBCompression, name)
-			}
-		case 2:
-			if name != "data.tar.gz" {
-				return fmt.Errorf("%w: %s", ErrUnsupportedDEBCompression, name)
-			}
-		default:
-			return fmt.Errorf("%w: extra member %s", ErrMalformedDEB, name)
+			members[member] = body
+			member++
 		}
-		member++
 		data = data[60+size:]
 		if size%2 != 0 {
 			if len(data) == 0 {
-				return ErrMalformedDEB
+				return fail(ErrMalformedDEB)
 			}
 			data = data[1:]
 		}
 	}
 	if member != 3 {
-		return fmt.Errorf("%w: missing archive member", ErrMalformedDEB)
+		return fail(fmt.Errorf("%w: missing archive member", ErrMalformedDEB))
 	}
-	return nil
+	return members, nil
 }
 
 // CheckRPMFormat checks the supported RPM lead and payload compression. It

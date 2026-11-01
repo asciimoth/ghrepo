@@ -3,6 +3,8 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -651,5 +653,46 @@ func TestAddCompatibilityDEB(t *testing.T) {
 	}
 	if !bytes.Equal(before, mustRead(t, filepath.Join(runner.Dir, "packages.yaml"))) {
 		t.Fatal("repeat add or sync changed manifest")
+	}
+}
+
+func TestAddSignatureCompatibility(t *testing.T) {
+	for _, file := range []string{"eddsa-sha512.rpm", "hello_signed-envelope.deb"} {
+		t.Run(file, func(t *testing.T) {
+			data := mustRead(t, "../contract/testdata/packages/"+file)
+			url := "https://example.com/" + file
+			runner := Runner{Dir: t.TempDir(), Fetcher: fixtureFetcher{map[string][]byte{url: data}}}
+			ctx := context.Background()
+			if err := runner.Run(ctx, []string{"init", "--repo", "example/repo", "--source-hosts", "example.com"}); err != nil {
+				t.Fatal(err)
+			}
+			before := mustRead(t, filepath.Join(runner.Dir, "packages.yaml"))
+			if err := runner.Run(ctx, []string{"add", "--dry-run", url}); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, mustRead(t, filepath.Join(runner.Dir, "packages.yaml"))) {
+				t.Fatal("dry run changed manifest")
+			}
+			if err := runner.Run(ctx, []string{"add", url}); err != nil {
+				t.Fatal(err)
+			}
+			_, manifest, err := runner.load()
+			if err != nil || len(manifest.Packages) != 1 {
+				t.Fatalf("manifest = %+v, error = %v", manifest, err)
+			}
+			p := manifest.Packages[0]
+			sum := sha256.Sum256(data)
+			if p.Size != int64(len(data)) || p.SHA256 != hex.EncodeToString(sum[:]) {
+				t.Fatalf("package bytes changed: %+v", p)
+			}
+			if !bytes.Equal(data, mustRead(t, filepath.Join(runner.Dir, "local-cache", "sha256", p.SHA256))) {
+				t.Fatal("cached bytes changed")
+			}
+			for _, args := range [][]string{{"add", url}, {"sync"}} {
+				if err := runner.Run(ctx, args); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
 	}
 }

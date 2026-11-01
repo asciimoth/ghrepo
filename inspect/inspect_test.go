@@ -3,8 +3,49 @@ package inspect
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/asciimoth/ghrepo/contract"
+	rpmutils "github.com/sassoftware/go-rpmutils"
 )
+
+func TestPackageArchitectureAndServedPath(t *testing.T) {
+	for _, arch := range []string{"amd64", "arm64", "i386", "armhf", "riscv64gc"} {
+		t.Run("deb/"+arch, func(t *testing.T) {
+			control := strings.Replace(testControl, "Architecture: amd64", "Architecture: "+arch, 1)
+			data := testDEBEntries(t, []tarEntry{regularEntry("control", control)})
+			checkPackageArchitectureAndPath(t, data, arch, "deb/pool/hello_1.2.0-1_"+arch+"_000000000000.deb")
+		})
+	}
+	for _, arch := range []string{"x86_64", "aarch64", "i386", "armv6hl", "riscv64gc"} {
+		t.Run("rpm/"+arch, func(t *testing.T) {
+			data := testRPM(map[uint32]*rpmTestTag{
+				rpmutils.ARCH: rpmStrings(rpmutils.ARCH, rpmutils.RPM_STRING_TYPE, arch),
+			})
+			checkPackageArchitectureAndPath(t, data, arch, "rpm/packages/fixture-0_1.2-3."+arch+".000000000000.rpm")
+		})
+	}
+}
+
+func checkPackageArchitectureAndPath(t *testing.T, data []byte, arch, wantPath string) {
+	t.Helper()
+	meta, err := Bytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Identity.Architecture != arch {
+		t.Fatalf("architecture = %q, want %q", meta.Identity.Architecture, arch)
+	}
+	p := contract.Package{Format: meta.Format, Identity: meta.Identity, SHA256: strings.Repeat("0", 64)}
+	path, err := contract.ServedPath(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != wantPath {
+		t.Fatalf("served path = %q, want %q", path, wantPath)
+	}
+}
 
 func TestFixtures(t *testing.T) {
 	root := "../contract/testdata/packages"
@@ -15,6 +56,8 @@ func TestFixtures(t *testing.T) {
 		{"payload-gzip.rpm", "rpm", "payload-test"},
 		{"payload-xz.rpm", "rpm", "payload-test"},
 		{"compat.rpm", "rpm", "ghrepo-compat"},
+		{"eddsa-sha512.rpm", "rpm", "empty"},
+		{"hello_signed-envelope.deb", "deb", "hello"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, size, hash, err := File(filepath.Join(root, tc.name), 2147483647)

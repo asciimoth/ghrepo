@@ -177,3 +177,26 @@ func TestRPMBuildCompatibility(t *testing.T) {
 		})
 	}
 }
+
+func TestDEBExtensionCompatibility(t *testing.T) {
+	tool := compatibilityTool(t, "dpkg-deb", "GHREPO_DEB_COMPAT")
+	for pos := uint8(0); pos < 3; pos++ {
+		t.Run(fmt.Sprint(pos), func(t *testing.T) {
+			raw := debWithExtensions(t, "_gpgorigin", []byte("opaque signature"), pos)
+			file := filepath.Join(t.TempDir(), "package.deb")
+			if err := os.WriteFile(file, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := exec.Command(tool, "--field", file, "Package").CombinedOutput()
+			if err != nil || strings.TrimSpace(string(out)) != "hello" {
+				t.Fatalf("dpkg-deb: %v: %s", err, out)
+			}
+			// --contents reads past control to the payload and any intervening
+			// extension members.
+			if out, err := exec.Command(tool, "--contents", file).CombinedOutput(); err != nil {
+				t.Fatalf("dpkg-deb payload: %v: %s", err, out)
+			}
+			requireDEBMetadata(t, raw)
+		})
+	}
+}

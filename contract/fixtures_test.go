@@ -41,7 +41,7 @@ func TestOfflineFixtures(t *testing.T) {
 	if err := json.Unmarshal(catalog, &cases); err != nil {
 		t.Fatal(err)
 	}
-	if len(cases) != 12 {
+	if len(cases) != 14 {
 		t.Fatalf("fixture count = %d", len(cases))
 	}
 	seen := map[string]string{}

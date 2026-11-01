@@ -185,7 +185,7 @@ func TestRPMHeaderBounds(t *testing.T) {
 
 func FuzzRPMInspection(f *testing.F) {
 	f.Add(testRPM(nil))
-	for _, name := range []string{"empty-0.1-1.x86_64.rpm", "payload-gzip.rpm", "payload-xz.rpm"} {
+	for _, name := range []string{"empty-0.1-1.x86_64.rpm", "payload-gzip.rpm", "payload-xz.rpm", "eddsa-sha512.rpm"} {
 		raw, err := os.ReadFile(filepath.Join("../contract/testdata/packages", name))
 		if err != nil {
 			f.Fatal(err)

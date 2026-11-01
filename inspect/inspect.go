@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
-	"crypto"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -69,17 +68,12 @@ func Bytes(data []byte) (Metadata, error) {
 }
 
 func deb(data []byte) (Metadata, error) {
-	if err := contract.CheckDEBFormat(data); err != nil {
+	members, err := contract.DEBMembers(data)
+	if err != nil {
 		return Metadata{}, err
 	}
-	data = data[8:]
 	var control []byte
-	for member := 0; member < 3; member++ {
-		n := 0
-		if _, err := fmt.Sscanf(strings.TrimSpace(string(data[48:58])), "%d", &n); err != nil {
-			return Metadata{}, contract.ErrMalformedDEB
-		}
-		body := data[60 : 60+n]
+	for member, body := range members {
 		if member == 2 {
 			zr, err := gzip.NewReader(bytes.NewReader(body))
 			if err != nil {
@@ -153,10 +147,6 @@ func deb(data []byte) (Metadata, error) {
 			if err := zr.Close(); err != nil {
 				return Metadata{}, err
 			}
-		}
-		data = data[60+n:]
-		if n%2 != 0 {
-			data = data[1:]
 		}
 	}
 	if !utf8.Valid(control) {
@@ -293,24 +283,36 @@ func rpm(data []byte) (Metadata, error) {
 	for _, item := range []struct {
 		name string
 		tag  int
-		algo packet.PublicKeyAlgorithm
-	}{{"RSA", rpmutils.SIG_RSA, packet.PubKeyAlgoRSA}, {"DSA", rpmutils.SIG_DSA, packet.PubKeyAlgoEdDSA}, {"PGP", rpmutils.SIG_PGP, packet.PubKeyAlgoRSA}, {"GPG", rpmutils.SIG_GPG, packet.PubKeyAlgoEdDSA}} {
+	}{{"RSA", rpmutils.SIG_RSA}, {"DSA", rpmutils.SIG_DSA}, {"PGP", rpmutils.SIG_PGP}, {"GPG", rpmutils.SIG_GPG}} {
 		if hdr.HasTag(item.tag) {
 			raw, err := hdr.GetBytes(item.tag)
 			if err != nil || len(raw) == 0 {
 				return Metadata{}, errors.New("invalid RPM package signature tag")
+			}
+			if !completeSignaturePacket(raw) {
+				return Metadata{}, errors.New("invalid RPM package signature length or type")
 			}
 			reader := bytes.NewReader(raw)
 			sig, err := packet.Read(reader)
 			if err != nil || reader.Len() != 0 {
 				return Metadata{}, errors.New("invalid RPM package signature")
 			}
+			// Inspection checks structure, not trust or digest policy.
+			// DSA/GPG are historical tag names shared by DSA, ECDSA, and EdDSA.
 			v4, ok := sig.(*packet.Signature)
-			if !ok || v4.PubKeyAlgo != item.algo || v4.Hash != crypto.SHA256 {
+			if !ok || !signatureTagMatches(item.tag, v4.PubKeyAlgo) {
 				return Metadata{}, errors.New("unsupported RPM package signature")
 			}
 			signatures = append(signatures, item.name)
 		}
 	}
 	return Metadata{Identity: contract.Identity{Name: n.Name, Epoch: epoch, Version: n.Version, Release: n.Release, Architecture: n.Arch}, Format: "rpm", Fields: fields, Requires: requires, Requirements: dependencies, SignatureTags: signatures}, nil
+}
+
+// Trust and digest restrictions are enforced by rpm.VerifyPackageSignature.
+func signatureTagMatches(tag int, algo packet.PublicKeyAlgorithm) bool {
+	if tag == rpmutils.SIG_RSA || tag == rpmutils.SIG_PGP {
+		return algo == packet.PubKeyAlgoRSA || algo == packet.PubKeyAlgoRSASignOnly
+	}
+	return algo == packet.PubKeyAlgoDSA || algo == packet.PubKeyAlgoECDSA || algo == packet.PubKeyAlgoEdDSA
 }

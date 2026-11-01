@@ -380,7 +380,7 @@ func TestDEBEnvelopeCompatibilityAndFailures(t *testing.T) {
 		{"oversize member", func(b []byte) []byte { copy(b[56:66], "9999999999"); return b }},
 		{"nondecimal member size", func(b []byte) []byte { copy(b[56:66], "x         "); return b }},
 		{"unsupported version", func(b []byte) []byte { return bytes.Replace(b, []byte("2.0\n"), []byte("3.0\n"), 1) }},
-		{"extra member", func(b []byte) []byte { return append(b, b[8:72]...) }},
+		{"truncated extra member", func(b []byte) []byte { return append(b, b[8:71]...) }},
 		{"out of order", func(b []byte) []byte { return bytes.Replace(b, []byte("control.tar.gz"), []byte("data.tar.gz  "), 1) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -404,7 +404,7 @@ func TestDEBEnvelopeCompatibilityAndFailures(t *testing.T) {
 }
 
 func FuzzDEBInspection(f *testing.F) {
-	for _, name := range []string{"hello_1.2.0-1_amd64.deb", "hello_compat.deb", "hello_unsafe.deb", "hello_malformed.deb"} {
+	for _, name := range []string{"hello_1.2.0-1_amd64.deb", "hello_compat.deb", "hello_unsafe.deb", "hello_malformed.deb", "hello_signed-envelope.deb"} {
 		raw, err := os.ReadFile(filepath.Join("../contract/testdata/packages", name))
 		if err != nil {
 			f.Fatal(err)
@@ -417,5 +417,69 @@ func FuzzDEBInspection(f *testing.F) {
 		}
 		// Keep this target on the DEB parser, including malformed envelopes.
 		_, _ = deb(raw)
+	})
+}
+
+func appendARMember(raw []byte, name string, body []byte) []byte {
+	var out bytes.Buffer
+	out.Write(raw)
+	fmt.Fprintf(&out, "%-16s%-12d%-6d%-6d%-8o%-10d`\n", name+"/", 0, 0, 0, 0644, len(body))
+	out.Write(body)
+	if len(body)%2 != 0 {
+		out.WriteByte('\n')
+	}
+	return out.Bytes()
+}
+
+func debWithExtensions(t testing.TB, name string, body []byte, position uint8) []byte {
+	t.Helper()
+	base := testDEBEntries(t, []tarEntry{regularEntry("control", testControl)})
+	// Positions after debian-binary, after control, and after data.
+	offset := 72
+	if position%3 > 0 {
+		var size int
+		if _, err := fmt.Sscanf(string(base[offset+48:offset+58]), "%d", &size); err != nil {
+			t.Fatal(err)
+		}
+		offset += 60 + size + size%2
+	}
+	if position%3 == 2 {
+		offset = len(base)
+	}
+	return append(appendARMember(base[:offset], name, body), base[offset:]...)
+}
+
+func TestDEBExtensionMembers(t *testing.T) {
+	for _, body := range [][]byte{nil, []byte("odd"), []byte("even")} {
+		for pos := uint8(0); pos < 3; pos++ {
+			t.Run(fmt.Sprintf("position=%d/size=%d", pos, len(body)), func(t *testing.T) {
+				requireDEBMetadata(t, debWithExtensions(t, "_gpgorigin", body, pos))
+				raw := debWithExtensions(t, "extension", body, pos)
+				_, err := Bytes(raw)
+				if (err == nil) != (pos == 2) {
+					t.Fatalf("unmarked extension at position %d: %v", pos, err)
+				}
+			})
+		}
+	}
+	raw := debWithExtensions(t, "_gpgorigin", []byte("odd"), 2)
+	for n := len(raw) - 4; n < len(raw); n++ {
+		if _, err := Bytes(raw[:n]); err == nil {
+			t.Fatalf("accepted truncated extension at %d", n)
+		}
+	}
+}
+
+func FuzzDEBExtensionMember(f *testing.F) {
+	for pos := uint8(0); pos < 3; pos++ {
+		f.Add("_gpgorigin", []byte("signature"), pos)
+		f.Add("extension", []byte{}, pos)
+	}
+	f.Fuzz(func(t *testing.T, name string, body []byte, pos uint8) {
+		if len(name) > 15 || len(body) > 64*1024 {
+			t.Skip()
+		}
+		raw := debWithExtensions(t, name, body, pos)
+		_, _ = Bytes(raw)
 	})
 }

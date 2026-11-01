@@ -23,6 +23,10 @@ func main() {
 	write(base, "hello_unsafe.deb", deb(control, "../control"))
 	write(base, "hello_malformed.deb", []byte("!<arch>\ninvalid archive"))
 	write(base, "hello_compat.deb", compatibilityDEB())
+	var signed bytes.Buffer
+	signed.Write(deb(control, "control"))
+	ar(&signed, "_gpgorigin", []byte("fixture signature"))
+	write(base, "hello_signed-envelope.deb", signed.Bytes())
 }
 
 func compatibilityDEB() []byte {

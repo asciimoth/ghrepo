@@ -210,7 +210,7 @@ added to an immutable release.
 | RPM package             | RPM lead major 3 with version 4 headers; gzip, xz, or zstd cpio payload                                     | `unsupported RPM package version or payload compression` |
 | RPM repository metadata | gzip XML `primary`, `filelists`, and `other`, referenced by `repomd.xml`                                    | `unsupported RPM metadata type`                          |
 | Repository signatures   | OpenPGP RSA or Ed25519 (EdDSA) with SHA-256, detached RPM `repomd.xml.asc` and clear-signed APT `InRelease` | `unsupported signature algorithm`                        |
-| RPM package signatures  | Existing or locally copied OpenPGP RSA or Ed25519 (EdDSA) with SHA-256 from configured trusted keys         | `unsupported RPM package signature`                      |
+| RPM package signatures  | Trusted packages: OpenPGP RSA or Ed25519 (EdDSA) with SHA-256 from configured trusted keys                  | `unsupported RPM package signature`                      |
 
 `deb/Packages`, `deb/Packages.gz`, `deb/Release`, and `deb/InRelease` are
 generated locally. Version 1 does not emit `Release.gpg`. `Acquire-By-Hash` is
@@ -236,6 +236,14 @@ packaging backend. It checks refresh and package download. Set
 `GHREPO_APT_INSTALL=1` only in a disposable root container to also check
 installation.
 
+The DEB envelope permits members whose names start with `_` after
+`debian-binary`, and any extra members after `data.tar.gz`, as specified by
+[deb(5)](https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html). These
+members can contain upstream signatures. Their bodies are ignored, but their
+archive headers, sizes, and padding must be complete. This does not verify DEB
+package signatures. The three required members must remain in order. Compression
+other than gzip remains unsupported for both control and data.
+
 The DEB control archive must contain one regular `control` or `./control` file,
 at most 1 MiB in size. Safe regular metadata files, such as `md5sums`, and
 directory entries are allowed. Links, special files, unsafe paths, and duplicate
@@ -255,31 +263,38 @@ types, counts, offsets, and string termination. It also checks the lengths of
 parallel file arrays and their directory indexes. Unknown tags with valid types
 are allowed. Inspection uses the default text from translated summary and
 description fields. Malformed identity, dependency, and signature tags are
-rejected. RPM file paths can contain two dots within a name, but a `..` path
-component is rejected. The local copy signature passes independent
-`rpm --checksig` with an imported test key. The DEB fixture uses Go's
-`archive/tar` and `compress/gzip`, so no third-party DEB reader is needed for
-the first compression method. The `rpm` package generates checksum-named gzip
-XML `primary`, `filelists`, and `other` files. `repomd.xml` records each
-compressed and open SHA-256, size, location, and timestamp. `repomd.xml.asc` is
-a detached RSA or Ed25519 SHA-256 GPG signature. `rpm.Verify` checks this
-signature, all metadata checksums and package entries against the active
-manifest, and package bytes when given a site root. Retained packages do not
-appear in new metadata. A failed build removes its new output directory. The
-caller replaces existing metadata only after verification.
+rejected. Inspection accepts the digest algorithms supported by the OpenPGP
+parser, including SHA-1, SHA-224, SHA-256, SHA-384, and SHA-512. RSA and
+sign-only RSA use the RSA/PGP tags; DSA, ECDSA, and EdDSA use the historical
+DSA/GPG tags. These tag families follow the
+[RPM v4 format](https://rpm-software-management.github.io/rpm/manual/format_v4.html).
+The packet must be one complete, parseable signature with no trailing data.
+Inspection does not establish signature trust. RPM file paths can contain two
+dots within a name, but a `..` path component is rejected. The local copy
+signature passes independent `rpm --checksig` with an imported test key. The DEB
+fixture uses Go's `archive/tar` and `compress/gzip`, so no third-party DEB
+reader is needed for the first compression method. The `rpm` package generates
+checksum-named gzip XML `primary`, `filelists`, and `other` files. `repomd.xml`
+records each compressed and open SHA-256, size, location, and timestamp.
+`repomd.xml.asc` is a detached RSA or Ed25519 SHA-256 GPG signature.
+`rpm.Verify` checks this signature, all metadata checksums and package entries
+against the active manifest, and package bytes when given a site root. Retained
+packages do not appear in new metadata. A failed build removes its new output
+directory. The caller replaces existing metadata only after verification.
 
 `metadata-only` leaves upstream RPM bytes unchanged and requires
-`repo_gpgcheck=1`, `gpgcheck=0` in generated client settings. For
-`trusted-packages`, each package needs a full-payload RSA or Ed25519 SHA-256
-signature that verifies against a configured public key. The metadata signing
-key does not grant trust to package bytes. `rpm.SignCopy` uses the local GPG
-keyring or agent to sign a general RPM header and its payload, writes a new
-copy, and verifies the copy against configured trusted keys. It never exports a
-private key. The caller must inspect, hash, and upload the final copy, then use
-that copy's hash and served path in `packages.yaml`. The optional local HTTP
-compatibility test uses RPM and DNF to check repository signature verification,
-refresh, lookup, and download. DNF 4 passes this test in the local Nix
-environment. It checks RPM installation in isolated RPM databases for both
+`repo_gpgcheck=1`, `gpgcheck=0` in generated client settings. It accepts the
+structurally valid signatures described above without a trusted key or SHA-256
+requirement. For `trusted-packages`, each package needs a full-payload RSA or
+Ed25519 SHA-256 signature that verifies against a configured public key. The
+metadata signing key does not grant trust to package bytes. `rpm.SignCopy` uses
+the local GPG keyring or agent to sign a general RPM header and its payload,
+writes a new copy, and verifies the copy against configured trusted keys. It
+never exports a private key. The caller must inspect, hash, and upload the final
+copy, then use that copy's hash and served path in `packages.yaml`. The optional
+local HTTP compatibility test uses RPM and DNF to check repository signature
+verification, refresh, lookup, and download. DNF 4 passes this test in the local
+Nix environment. It checks RPM installation in isolated RPM databases for both
 signature policies. With `GHREPO_RPM_INSTALL=1`, DNF installs the unsigned
 fixture under `gpgcheck=0`, rejects it under `gpgcheck=1`, and installs the
 signed copy under `gpgcheck=1`. Run this option in a disposable root or user
@@ -329,9 +344,14 @@ payload-test RPMs. They are distributed under Apache-2.0; their source specs are
 checked-in RPMs require no RPM tools for tests.
 `contract/testdata/generate-rpm.sh` copies the pinned RPMs and checks their
 hashes. `contract/testdata/cases.json` records the expected positive and
-negative cases. `invalid-signature.asc` is intentionally invalid test data, not
-a key or usable signature. Normal tests only read local files and do not use the
-network.
+negative cases. `contract/testdata/generate-signature/main.go` adds parseable
+EdDSA/SHA-512 signature packets to the empty RPM fixture. The packet MPI values
+are placeholders, not valid cryptographic signatures. The DEB generator also
+adds an opaque signature member in `hello_signed-envelope.deb`. These fixtures
+test parsing and byte preservation; separate tests create real signatures with
+temporary GPG keys to check trust policy. `invalid-signature.asc` is
+intentionally invalid test data, not a key or usable signature. Normal tests
+only read local files and do not use the network.
 
 ## Local publishing transaction
 
