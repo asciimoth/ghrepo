@@ -59,6 +59,9 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build")
 	}
+	if command, ok := helpCommand(args); ok {
+		return c.printHelp(command)
+	}
 	if args[0] != "update" && args[0] != "publish" {
 		args = c.extractDryRun(args)
 	}

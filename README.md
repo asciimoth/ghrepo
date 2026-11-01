@@ -8,6 +8,9 @@ Build the `ghrepo` binary with `just build`, or run a command from the source
 tree with `just run <command> [args]`. To use the commands below, initialize a
 repository with public URLs, then add packages by HTTPS URL:
 
+Run `ghrepo --help` to list commands, or `ghrepo COMMAND --help` to see a
+command's usage.
+
 ```sh
 ghrepo init --repo example/repo --source-hosts example.com
 ghrepo add https://example.com/releases/hello.deb
