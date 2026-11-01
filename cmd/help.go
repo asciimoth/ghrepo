@@ -8,19 +8,20 @@ import (
 const rootHelp = `Usage: ghrepo [--repo-dir DIR] COMMAND [OPTIONS]
 
 Commands:
-  init        Create or update repository configuration
-  add         Add packages by URL or upload local files
-  update      Add newer packages from GitHub releases
-  replace     Replace a package and retain its old path
-  sync        Download and verify packages
-  source set  Change a package source URL
-  remove      Mark packages as retained
-  prune       List or remove eligible retained packages
-  rebuild     Build signed repository metadata
-  check       Check repository data and the rendered site
-  publish     Build, check, commit, and push changes
-  gc          List unreferenced GitHub release assets
-  site-build  Build the Pages site
+  init          Create or update repository configuration
+  add           Add packages by URL or upload local files
+  update        Add newer packages from GitHub releases
+  replace       Replace a package and retain its old path
+  sync          Download and verify packages
+  source set    Change a package source URL
+  remove        Mark packages as retained
+  prune         List or remove eligible retained packages
+  rebuild       Build signed repository metadata
+  check         Check repository data and the rendered site
+  publish       Build, check, commit, and push changes
+  gc            List unreferenced GitHub release assets
+  site-build    Build the Pages site
+  readme-build  Render the repository README
 
 Global options:
   --repo-dir DIR  Select the repository directory (also: GHREPO_REPO_DIR)
@@ -31,19 +32,20 @@ Run "ghrepo COMMAND --help" for command usage.
 `
 
 var commandHelp = map[string]string{
-	"init":       "Usage: ghrepo init [DIR] [--repo USER/REPO] [--site URL] [--branch NAME] [--source-hosts HOSTS] [--redirect-hosts HOSTS] [--key-id ID] [--create-remote] [--configure-pages] [--dry-run]",
-	"add":        "Usage: ghrepo add [--dry-run] URL...\n       ghrepo add --upload [--sign-rpm] [--dry-run] FILE...",
-	"update":     "Usage: ghrepo update [--dry-run]",
-	"replace":    "Usage: ghrepo replace [--dry-run] SELECTOR URL",
-	"sync":       "Usage: ghrepo sync [--dry-run]",
-	"source set": "Usage: ghrepo source set [--dry-run] SELECTOR URL",
-	"remove":     "Usage: ghrepo remove [--dry-run] SELECTOR...",
-	"prune":      "Usage: ghrepo prune [--apply] [--dry-run]",
-	"rebuild":    "Usage: ghrepo rebuild [--dry-run]",
-	"check":      "Usage: ghrepo check [--dry-run]",
-	"publish":    "Usage: ghrepo publish [--dry-run] [--message TEXT]",
-	"gc":         "Usage: ghrepo gc",
-	"site-build": "Usage: ghrepo site-build [--dry-run]",
+	"init":         "Usage: ghrepo init [DIR] [--repo USER/REPO] [--site URL] [--branch NAME] [--source-hosts HOSTS] [--redirect-hosts HOSTS] [--key-id ID] [--create-remote] [--configure-pages] [--dry-run]",
+	"add":          "Usage: ghrepo add [--dry-run] URL...\n       ghrepo add --upload [--sign-rpm] [--dry-run] FILE...",
+	"update":       "Usage: ghrepo update [--dry-run]",
+	"replace":      "Usage: ghrepo replace [--dry-run] SELECTOR URL",
+	"sync":         "Usage: ghrepo sync [--dry-run]",
+	"source set":   "Usage: ghrepo source set [--dry-run] SELECTOR URL",
+	"remove":       "Usage: ghrepo remove [--dry-run] SELECTOR...",
+	"prune":        "Usage: ghrepo prune [--apply] [--dry-run]",
+	"rebuild":      "Usage: ghrepo rebuild [--dry-run]",
+	"check":        "Usage: ghrepo check [--dry-run]",
+	"publish":      "Usage: ghrepo publish [--dry-run] [--message TEXT]",
+	"gc":           "Usage: ghrepo gc",
+	"site-build":   "Usage: ghrepo site-build [--dry-run]",
+	"readme-build": "Usage: ghrepo readme-build [--dry-run]",
 }
 
 func helpCommand(args []string) (string, bool) {

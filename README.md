@@ -222,6 +222,16 @@ packages:
 The builder requires `templates/index.html`. Template parse errors or unknown
 fields fail the site build.
 
+## Repository README
+
+`ghrepo init` creates `templates/README.md` and renders it to the repository
+root as `README.md`. Edit the template to change the README. Run
+`ghrepo readme-build` to render it after package or template changes. The
+template uses Go's `text/template` with `.Repository`, `.Packages`, and
+`.BaseURL`. `ghrepo publish` renders the README after checking the repository
+and includes the template and rendered file in its commit. A template error
+leaves the previous README intact.
+
 ## Docker compatibility tests
 
 Run `just test-e2e` with Docker available. The test builds Linux test binaries

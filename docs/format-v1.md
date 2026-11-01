@@ -275,6 +275,11 @@ The builder renders present templates into the artifact and requires
 committed public key. It does not read local configuration or signing keys. Only
 a complete, verified site replaces `build/site/`.
 
+`init` also installs `templates/README.md` and renders it to the repository
+root. `ghrepo readme-build` renders this template on demand. `ghrepo publish`
+renders it before committing both the template and `README.md`. This README is
+repository documentation and is not part of the Pages artifact.
+
 ## Fixture source and license
 
 `contract/testdata/generate/main.go` deterministically creates the four DEB

@@ -151,6 +151,14 @@ func TestRebuildCheckDryRunAndPublish(t *testing.T) {
 	if err := runner.Run(ctx, []string{"publish", "--message", "chore(repo): publish fixtures"}); err != nil {
 		t.Fatal(err)
 	}
+	readme := string(mustRead(t, filepath.Join(dir, "README.md")))
+	if !strings.Contains(readme, "hello 1.2.0-1") || !strings.Contains(readme, "empty 0.1") {
+		t.Fatalf("publish did not render package list: %s", readme)
+	}
+	committedReadme, err := runner.gitOutput("show", "HEAD:README.md")
+	if err != nil || string(committedReadme) != readme {
+		t.Fatalf("publish did not commit rendered README: %v", err)
+	}
 	command(t, dir, "git", "--git-dir", remote, "show", "main:packages.yaml")
 	staged, err := runner.gitOutput("ls-tree", "-r", "--name-only", "HEAD")
 	if err != nil {
@@ -166,6 +174,19 @@ func TestRebuildCheckDryRunAndPublish(t *testing.T) {
 	}
 	if len(strings.Split(strings.TrimSpace(text), "\n")) != len(strings.Split(strings.TrimSpace(string(staged)), "\n")) {
 		t.Fatalf("dry-run path count differs from commit: %s", text)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "templates", "README.md"), []byte("Published: {{.Repository.RPM.Name}}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"publish"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(mustRead(t, filepath.Join(dir, "README.md"))); got != "Published: Packages\n" {
+		t.Fatalf("second publish did not render README: %q", got)
+	}
+	remoteReadme := exec.Command("git", "--git-dir", remote, "show", "main:README.md")
+	if got, err := remoteReadme.Output(); err != nil || string(got) != "Published: Packages\n" {
+		t.Fatalf("second publish did not push README: %q: %v", got, err)
 	}
 }
 

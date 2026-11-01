@@ -57,7 +57,7 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		return err
 	}
 	if len(args) == 0 {
-		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build")
+		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build|readme-build")
 	}
 	if command, ok := helpCommand(args); ok {
 		return c.printHelp(command)
@@ -66,7 +66,7 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		args = c.extractDryRun(args)
 	}
 	if len(args) == 0 {
-		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build")
+		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build|readme-build")
 	}
 	switch args[0] {
 	case "init":
@@ -116,6 +116,14 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 			return c.previewBuild(ctx, "site-build")
 		}
 		return site.Build(ctx, c.root(), filepath.Join(c.root(), "build", "site"), c.Fetcher)
+	case "readme-build":
+		if len(args) != 1 {
+			return errors.New("usage: ghrepo readme-build")
+		}
+		if c.dryRun {
+			return c.previewBuild(ctx, "readme-build")
+		}
+		return site.RenderReadme(c.root())
 	default:
 		return errors.New("unknown command")
 	}
@@ -152,6 +160,8 @@ func (c Runner) previewBuild(ctx context.Context, name string) error {
 		err = c.check(ctx)
 	case "site-build":
 		err = site.Build(ctx, c.root(), filepath.Join(c.root(), "build", "site"), c.Fetcher)
+	case "readme-build":
+		err = site.RenderReadme(c.root())
 	}
 	if err != nil {
 		return err
@@ -389,6 +399,14 @@ func (c Runner) init(ctx context.Context, args []string) error {
 		}, 0644); err != nil {
 			return err
 		}
+	}
+	if err := createIfAbsent(filepath.Join(dir, "templates", "README.md"), func() ([]byte, error) {
+		return []byte(site.ReadmeTemplate), nil
+	}, 0644); err != nil {
+		return err
+	}
+	if err := site.RenderReadme(dir); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Join(dir, ".github", "workflows"), 0755); err != nil {
 		return err

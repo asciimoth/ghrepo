@@ -80,7 +80,50 @@ func TestInitRepoAndSiteURLs(t *testing.T) {
 			if !strings.Contains(page, ">"+owner+"</a>") || strings.Contains(page, "__GHREPO_OWNER__") {
 				t.Fatal("default page does not show the repository owner")
 			}
+			if _, err := os.Stat(filepath.Join(dir, "templates", "README.md")); err != nil {
+				t.Fatal(err)
+			}
+			readme := string(mustRead(t, filepath.Join(dir, "README.md")))
+			if !strings.Contains(readme, tt.site) || !strings.Contains(readme, "No packages are available yet.") {
+				t.Fatal("init did not render the README")
+			}
 		})
+	}
+}
+
+func TestReadmeBuildUsesCustomTemplate(t *testing.T) {
+	dir := t.TempDir()
+	runner := Runner{Dir: dir}
+	ctx := context.Background()
+	if err := runner.Run(ctx, []string{"init", "--repo", "example/packages"}); err != nil {
+		t.Fatal(err)
+	}
+	readme := filepath.Join(dir, "README.md")
+	before := mustRead(t, readme)
+	template := filepath.Join(dir, "templates", "README.md")
+	if err := os.WriteFile(template, []byte("# {{.Repository.RPM.Name}}\n{{.BaseURL}}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"readme-build", "--dry-run"}); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, mustRead(t, readme)) {
+		t.Fatal("dry run changed the README")
+	}
+	if err := runner.Run(ctx, []string{"readme-build"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(mustRead(t, readme)); got != "# Packages\nhttps://example.github.io/packages\n" {
+		t.Fatalf("rendered README = %q", got)
+	}
+	if err := os.WriteFile(template, []byte("{{.Unknown}}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"readme-build"}); err == nil {
+		t.Fatal("invalid template was accepted")
+	}
+	if got := string(mustRead(t, readme)); got != "# Packages\nhttps://example.github.io/packages\n" {
+		t.Fatal("failed render changed the README")
 	}
 }
 

@@ -400,6 +400,9 @@ func (c Runner) publish(ctx context.Context, args []string) error {
 	if err := c.check(ctx); err != nil {
 		return err
 	}
+	if err := site.RenderReadme(c.root()); err != nil {
+		return err
+	}
 	paths, err := c.allowedGitPaths()
 	if err != nil {
 		return err
@@ -566,8 +569,8 @@ func (c Runner) allowedGitPaths() ([]string, error) {
 			trackedSet[p] = true
 		}
 	}
-	paths := []string{"ghrepo.yaml", "packages.yaml", "KEY.gpg", ".gitignore", ".github/workflows/pages.yml", "deb/Packages", "deb/Packages.gz", "deb/Release", "deb/InRelease", "rpm/repodata/repomd.xml", "rpm/repodata/repomd.xml.asc", "rpm/repodata/retention.json"}
-	for _, name := range []string{"index.html", "setup.sh", "deb.list", "rpm.repo"} {
+	paths := []string{"ghrepo.yaml", "packages.yaml", "README.md", "KEY.gpg", ".gitignore", ".github/workflows/pages.yml", "deb/Packages", "deb/Packages.gz", "deb/Release", "deb/InRelease", "rpm/repodata/repomd.xml", "rpm/repodata/repomd.xml.asc", "rpm/repodata/retention.json"}
+	for _, name := range []string{"index.html", "README.md", "setup.sh", "deb.list", "rpm.repo"} {
 		path := "templates/" + name
 		if _, err := os.Lstat(filepath.Join(c.root(), path)); err == nil || (errors.Is(err, os.ErrNotExist) && trackedSet[path]) {
 			paths = append(paths, path)
@@ -605,11 +608,11 @@ func (c Runner) allowedGitPaths() ([]string, error) {
 	return unique, nil
 }
 func safeGitPath(p string) bool {
-	if p == "ghrepo.yaml" || p == "packages.yaml" || p == "KEY.gpg" || p == ".gitignore" || p == ".github/workflows/pages.yml" {
+	if p == "ghrepo.yaml" || p == "packages.yaml" || p == "README.md" || p == "KEY.gpg" || p == ".gitignore" || p == ".github/workflows/pages.yml" {
 		return true
 	}
 	if strings.HasPrefix(p, "templates/") {
-		return p == "templates/index.html" || p == "templates/setup.sh" || p == "templates/deb.list" || p == "templates/rpm.repo"
+		return p == "templates/index.html" || p == "templates/README.md" || p == "templates/setup.sh" || p == "templates/deb.list" || p == "templates/rpm.repo"
 	}
 	if p == "deb/Packages" || p == "deb/Packages.gz" || p == "deb/Release" || p == "deb/InRelease" || p == "rpm/repodata/repomd.xml" || p == "rpm/repodata/repomd.xml.asc" || p == "rpm/repodata/retention.json" {
 		return true
