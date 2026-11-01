@@ -3,7 +3,7 @@ set positional-arguments := true
 set dotenv-load := true
 
 # Run all project checks.
-check: tidy typos fmt lint vet test test-e2e fuzz
+check: tidy typos fmt lint vet test test-flake test-e2e fuzz
 
 # Update the Go module files.
 tidy:
@@ -33,6 +33,10 @@ vet:
 # Run all tests with the race detector and coverage measurement.
 test:
     go test -race -cover ./...
+
+# Build the installable Nix package and check its dependency hash.
+test-flake:
+    nix build .#ghrepo --no-link
 
 # Check generated repositories with APT, DNF, and RPM in Docker.
 test-e2e:

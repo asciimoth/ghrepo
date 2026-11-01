@@ -1,3 +1,10 @@
+# Usage:
+# - Build the package: nix build .#ghrepo
+# - Run the CLI: nix run github:asciimoth/ghrepo#ghrepo -- --help
+# - Add to a temporary shell: nix shell github:asciimoth/ghrepo#ghrepo
+# - Add to a profile: nix profile install github:asciimoth/ghrepo#ghrepo
+# - Install in a NixOS configuration:
+#     environment.systemPackages = [ inputs.ghrepo.packages.${pkgs.system}.ghrepo ];
 {
   description = "Tool for hosting deb/rm repos on GH pages";
   inputs = {
@@ -40,6 +47,21 @@
         ]
       );
 
+      ghrepo = pkgs.buildGoModule {
+        pname = "ghrepo";
+        version = "unstable";
+        src = ./.;
+        vendorHash = "sha256-eLxLRvCh2ZeokRpFSEa3fmcK6llE2zIQYv/J3JLqXFc=";
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+        # GPG agent sockets inside test repositories break dry-run copy tests
+        # in the Nix sandbox. Run the Go suite outside the package build.
+        doCheck = false;
+        postInstall = ''
+          wrapProgram "$out/bin/ghrepo" \
+            --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.git pkgs.gnupg ]}
+        '';
+      };
+
       checks = {
         pre-commit-check = pre-commit-hooks.lib.${system}.run {
           src = ./.;
@@ -70,6 +92,11 @@
         };
       };
     in {
+      packages = {
+        inherit ghrepo;
+        default = ghrepo;
+      };
+
       devShells.default = pkgs.mkShell {
         inherit (checks.pre-commit-check) shellHook;
         buildInputs = with pkgs; [

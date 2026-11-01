@@ -2,6 +2,17 @@
 
 Tool for hosting DEB and RPM repositories on GitHub Pages.
 
+## Install with Nix
+
+Install the CLI from this repository:
+
+```sh
+nix profile install github:asciimoth/ghrepo
+```
+
+The flake also provides `packages.<system>.ghrepo`, so you can run it without
+installing it with `nix run github:asciimoth/ghrepo -- --help`.
+
 ## Set up a new GitHub repository
 
 Before you run `ghrepo init` for a repository you created on GitHub:
