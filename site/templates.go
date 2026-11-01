@@ -1,10 +1,44 @@
 package site
 
 import (
+	"fmt"
 	"html"
 	"net/url"
 	"strings"
 )
+
+// setupName identifies client files by the repository owner and name.
+func setupName(repositoryURL string) (string, error) {
+	u, err := url.Parse(repositoryURL)
+	if err != nil {
+		return "", err
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("repository URL needs an owner and name: %s", repositoryURL)
+	}
+	clean := func(part string) string {
+		var out strings.Builder
+		separator := false
+		for _, c := range strings.ToLower(part) {
+			if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
+				if separator && out.Len() > 0 {
+					out.WriteByte('-')
+				}
+				out.WriteRune(c)
+				separator = false
+			} else {
+				separator = true
+			}
+		}
+		return out.String()
+	}
+	owner, name := clean(parts[0]), clean(parts[1])
+	if owner == "" || name == "" {
+		return "", fmt.Errorf("repository URL needs an owner and name: %s", repositoryURL)
+	}
+	return owner + "-" + name, nil
+}
 
 // SourceTemplate is a file installed by init and rendered into the site.
 type SourceTemplate struct{ Name, Text string }
@@ -114,18 +148,18 @@ var DefaultTemplates = []SourceTemplate{
         <div class="card">
           <h3>Debian and Ubuntu (APT)</h3>
           <p>Install the <a href="KEY.gpg">public key</a> and <a href="deb.list">APT source file</a>, then update APT and install a package.</p>
-          <pre><code>curl -fsSLo KEY.gpg "{{.BaseURL}}/KEY.gpg"
-sudo install -m 0644 KEY.gpg /usr/share/keyrings/{{.Repository.RPM.ID}}-archive-keyring.gpg
-curl -fsSLo deb.list "{{.BaseURL}}/deb.list"
-sudo install -m 0644 deb.list /etc/apt/sources.list.d/{{.Repository.RPM.ID}}.list
+          <pre><code>curl -fsSLo {{.SetupName}}-key.gpg "{{.BaseURL}}/KEY.gpg"
+sudo install -m 0644 {{.SetupName}}-key.gpg /usr/share/keyrings/{{.SetupName}}-archive-keyring.gpg
+curl -fsSLo {{.SetupName}}.list "{{.BaseURL}}/deb.list"
+sudo install -m 0644 {{.SetupName}}.list /etc/apt/sources.list.d/{{.SetupName}}.list
 sudo apt update
 sudo apt install PACKAGE_NAME</code></pre>
         </div>
         <div class="card">
           <h3>Fedora and other DNF systems (RPM)</h3>
           <p>Install the <a href="rpm.repo">DNF repository file</a>, then refresh metadata and install a package. DNF uses the repository's public key to verify its metadata.</p>
-          <pre><code>curl -fsSLo rpm.repo "{{.BaseURL}}/rpm.repo"
-sudo install -m 0644 rpm.repo /etc/yum.repos.d/{{.Repository.RPM.ID}}.repo
+          <pre><code>curl -fsSLo {{.SetupName}}.repo "{{.BaseURL}}/rpm.repo"
+sudo install -m 0644 {{.SetupName}}.repo /etc/yum.repos.d/{{.SetupName}}.repo
 sudo dnf makecache
 sudo dnf install PACKAGE_NAME</code></pre>
         </div>
@@ -147,15 +181,15 @@ sudo dnf install PACKAGE_NAME</code></pre>
 `},
 	{"setup.sh", `#!/bin/sh
 set -eu
-curl -fsSLo KEY.gpg {{shellQuote (print .BaseURL "/KEY.gpg")}}
-curl -fsSLo deb.list {{shellQuote (print .BaseURL "/deb.list")}}
-curl -fsSLo rpm.repo {{shellQuote (print .BaseURL "/rpm.repo")}}
-printf '%s\n' 'Downloaded KEY.gpg, deb.list, and rpm.repo.'
+curl -fsSLo {{.SetupName}}-key.gpg {{shellQuote (print .BaseURL "/KEY.gpg")}}
+curl -fsSLo {{.SetupName}}.list {{shellQuote (print .BaseURL "/deb.list")}}
+curl -fsSLo {{.SetupName}}.repo {{shellQuote (print .BaseURL "/rpm.repo")}}
+printf '%s\n' 'Downloaded {{.SetupName}}-key.gpg, {{.SetupName}}.list, and {{.SetupName}}.repo.'
 printf '%s\n' 'Review these files before installing them with system privileges.'
 `},
-	{"deb.list", `deb [signed-by=/usr/share/keyrings/{{.Repository.RPM.ID}}-archive-keyring.gpg] {{.BaseURL}}/deb/ ./
+	{"deb.list", `deb [signed-by=/usr/share/keyrings/{{.SetupName}}-archive-keyring.gpg] {{.BaseURL}}/deb/ ./
 `},
-	{"rpm.repo", `[{{.Repository.RPM.ID}}]
+	{"rpm.repo", `[{{.SetupName}}]
 name={{.Repository.RPM.Name}}
 baseurl={{.BaseURL}}/rpm/
 enabled=1

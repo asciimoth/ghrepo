@@ -237,8 +237,9 @@ files from the committed templates.
 `index.html` packages page. By default, it uses Catppuccin Mocha colors and
 shows APT and DNF setup commands, active packages, the GitHub owner and source
 repository, the public PGP key, and a link to ghrepo. The setup commands use
-`deb.list` and `rpm.repo` from the site. `init` writes the owner name into the
-default template from the repository URL.
+`deb.list` and `rpm.repo` from the site. Installed files and the DNF repository
+ID use a name derived from the repository owner and name. `init` writes the
+owner name into the default template from the repository URL.
 
 Edit the source template to change the text, HTML, links, or package layout.
 `init` does not overwrite edited templates. The site builder reads the source
@@ -250,6 +251,7 @@ The template uses Go expressions in `{{` and `}}`. The available data is:
 | Expression    | Value                                                                                      |
 | ------------- | ------------------------------------------------------------------------------------------ |
 | `.BaseURL`    | `site.base_url` from `ghrepo.yaml`, without a trailing slash.                              |
+| `.SetupName`  | Lowercase owner and repository name for local setup files and the DNF repository ID.       |
 | `.Repository` | The validated `ghrepo.yaml` data, such as `.Repository.RPM.ID` and `.Repository.RPM.Name`. |
 | `.Packages`   | All entries from `packages.yaml`, including active and retained packages.                  |
 | `.GPGCheck`   | `1` for `trusted-packages`; `0` for `metadata-only`.                                       |

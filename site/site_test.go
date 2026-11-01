@@ -210,6 +210,12 @@ func TestBuildFromCleanCheckout(t *testing.T) {
 	if !strings.Contains(string(mustRead(t, filepath.Join(f.output, "deb.list"))), f.repo.Site.BaseURL+"/deb/ ./") {
 		t.Fatal("wrong APT source URL")
 	}
+	if !strings.Contains(string(mustRead(t, filepath.Join(f.output, "deb.list"))), "/usr/share/keyrings/example-repo-archive-keyring.gpg") {
+		t.Fatal("APT keyring name does not identify the repository")
+	}
+	if !strings.HasPrefix(string(mustRead(t, filepath.Join(f.output, "rpm.repo"))), "[example-repo]\n") {
+		t.Fatal("DNF repository ID does not identify the repository")
+	}
 	page := string(mustRead(t, filepath.Join(f.output, "index.html")))
 	for _, fragment := range []string{
 		"background: #1e1e2e",
@@ -222,7 +228,9 @@ func TestBuildFromCleanCheckout(t *testing.T) {
 		`href="rpm.repo"`,
 		"sudo apt install PACKAGE_NAME",
 		"sudo dnf install PACKAGE_NAME",
-		"/usr/share/keyrings/example-archive-keyring.gpg",
+		"/usr/share/keyrings/example-repo-archive-keyring.gpg",
+		"/etc/apt/sources.list.d/example-repo.list",
+		"/etc/yum.repos.d/example-repo.repo",
 	} {
 		if !strings.Contains(page, fragment) {
 			t.Errorf("packages page does not contain %q", fragment)
@@ -235,6 +243,12 @@ func TestBuildFromCleanCheckout(t *testing.T) {
 	}
 	if out, err := exec.Command("sh", "-n", filepath.Join(f.output, "setup.sh")).CombinedOutput(); err != nil {
 		t.Fatalf("invalid setup script: %v: %s", err, out)
+	}
+	setup := string(mustRead(t, filepath.Join(f.output, "setup.sh")))
+	for _, name := range []string{"example-repo-key.gpg", "example-repo.list", "example-repo.repo"} {
+		if !strings.Contains(setup, name) {
+			t.Errorf("setup script does not download %s", name)
+		}
 	}
 }
 

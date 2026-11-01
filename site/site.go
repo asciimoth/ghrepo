@@ -208,6 +208,10 @@ func linked(info os.FileInfo) bool {
 }
 
 func render(checkout, stage string, r contract.Repository, m contract.Manifest) error {
+	name, err := setupName(r.Repository.URL)
+	if err != nil {
+		return err
+	}
 	parsed, err := url.Parse(r.Site.BaseURL)
 	if err != nil {
 		return err
@@ -227,9 +231,10 @@ func render(checkout, stage string, r contract.Repository, m contract.Manifest) 
 		Repository contract.Repository
 		Packages   []contract.Package
 		BaseURL    string
+		SetupName  string
 		GPGCheck   int
 		RPMKeyURLs string
-	}{r, m.Packages, baseURL, gpgCheck, strings.Join(keys, " ")}
+	}{r, m.Packages, baseURL, name, gpgCheck, strings.Join(keys, " ")}
 	for _, item := range DefaultTemplates {
 		name := filepath.Join(checkout, "templates", item.Name)
 		data, err := readOptionalTemplate(name)
