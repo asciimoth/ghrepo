@@ -567,7 +567,7 @@ func (c Runner) allowedGitPaths() ([]string, error) {
 		}
 	}
 	paths := []string{"ghrepo.yaml", "packages.yaml", "KEY.gpg", ".gitignore", ".github/workflows/pages.yml", "deb/Packages", "deb/Packages.gz", "deb/Release", "deb/InRelease", "rpm/repodata/repomd.xml", "rpm/repodata/repomd.xml.asc", "rpm/repodata/retention.json"}
-	for _, name := range []string{"index.html", "README.md", "setup.sh", "deb.list", "rpm.repo"} {
+	for _, name := range []string{"index.html", "setup.sh", "deb.list", "rpm.repo"} {
 		path := "templates/" + name
 		if _, err := os.Lstat(filepath.Join(c.root(), path)); err == nil || (errors.Is(err, os.ErrNotExist) && trackedSet[path]) {
 			paths = append(paths, path)
@@ -609,7 +609,7 @@ func safeGitPath(p string) bool {
 		return true
 	}
 	if strings.HasPrefix(p, "templates/") {
-		return p == "templates/index.html" || p == "templates/README.md" || p == "templates/setup.sh" || p == "templates/deb.list" || p == "templates/rpm.repo"
+		return p == "templates/index.html" || p == "templates/setup.sh" || p == "templates/deb.list" || p == "templates/rpm.repo"
 	}
 	if p == "deb/Packages" || p == "deb/Packages.gz" || p == "deb/Release" || p == "deb/InRelease" || p == "rpm/repodata/repomd.xml" || p == "rpm/repodata/repomd.xml.asc" || p == "rpm/repodata/retention.json" {
 		return true

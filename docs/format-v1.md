@@ -263,12 +263,12 @@ APT and RPM metadata, trusted public RPM keys, and committed files under
 `templates/`. It downloads every active and retained package from its manifest
 URL and checks size and SHA-256 again. The artifact contains only those package
 paths, `KEY.gpg`, the four APT metadata files, RPM metadata with checksum-named
-files, configured trusted public keys, and rendered `index.html`, `README.md`,
-`setup.sh`, `deb.list`, `rpm.repo`, and optional `CNAME`. RPM metadata files
-kept for client retention must match the checksum in their filenames. The
-current RPM indexes are also verified against signed `repomd.xml`.
+files, configured trusted public keys, and rendered `index.html`, `setup.sh`,
+`deb.list`, `rpm.repo`, and optional `CNAME`. RPM metadata files kept for client
+retention must match the checksum in their filenames. The current RPM indexes
+are also verified against signed `repomd.xml`.
 
-`init` installs the five source templates without replacing customized files.
+`init` installs the four source templates without replacing customized files.
 The builder renders present templates into the artifact and requires
 `templates/index.html`. The generated `rpm.repo` sets `repo_gpgcheck=1` and sets
 `gpgcheck` from `rpm.package_signature`. The builder uses `gpgv` with the
@@ -307,7 +307,7 @@ explicit allowlist in a temporary Git index and reports the planned commit
 paths. `publish` checks that its staged tree matches this preview before it
 commits and pushes `HEAD` to `origin`. It rejects an index that already has a
 staged path outside the allowlist. The allowlist contains shared configuration,
-`packages.yaml`, public keys, the Pages workflow, the five named templates, and
+`packages.yaml`, public keys, the Pages workflow, the four templates, and
 generated signed metadata. It excludes local settings, `.env`, cache,
 transaction records, and build output even when ignore rules change.
 

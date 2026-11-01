@@ -173,25 +173,24 @@ URLs, checks their size and SHA-256, verifies the signed APT and RPM metadata
 with `KEY.gpg`, and writes `build/site/`. It needs `gpgv` for public-key
 verification. It does not need a private key or package-management tools. A
 failed build keeps the previous `build/site/` directory. The artifact also
-contains the rendered landing page, setup notes, download script, and APT and
-RPM client files from the committed templates.
+contains the rendered landing page, download script, and APT and RPM client
+files from the committed templates.
 
-## Packages page and setup notes
+## Packages page
 
-`ghrepo init` creates `templates/index.html` and `templates/README.md`. The
-first file becomes the site's `index.html` packages page. By default, it links
-to `deb.list`, `rpm.repo`, and `README.md`, then lists active packages with
-their names, versions, architectures, and download links. The second file
-becomes the site's `README.md` setup notes. By default, it gives the APT and RPM
-source URLs, links to `KEY.gpg` and the client configuration files, shows the
-APT keyring path, and lists active package downloads.
+`ghrepo init` creates `templates/index.html`, which becomes the site's
+`index.html` packages page. By default, it uses Catppuccin Mocha colors and
+shows APT and DNF setup commands, active packages, the GitHub owner and source
+repository, the public PGP key, and a link to ghrepo. The setup commands use
+`deb.list` and `rpm.repo` from the site. `init` writes the owner name into the
+default template from the repository URL.
 
-Edit these source files to change the text, HTML, Markdown, links, or package
-layout. `init` does not overwrite edited templates. The site builder reads the
-source templates on each build. Run `ghrepo check` to check the rendered site,
-then `ghrepo publish` to commit and deploy your changes.
+Edit the source template to change the text, HTML, links, or package layout.
+`init` does not overwrite edited templates. The site builder reads the source
+template on each build. Run `ghrepo check` to check the rendered site, then
+`ghrepo publish` to commit and deploy your changes.
 
-Both files use Go template expressions in `{{` and `}}`. The available data is:
+The template uses Go expressions in `{{` and `}}`. The available data is:
 
 | Expression    | Value                                                                                      |
 | ------------- | ------------------------------------------------------------------------------------------ |
@@ -220,16 +219,8 @@ packages:
 ```
 
 `index.html` uses Go's `html/template`, which escapes package values for HTML.
-`README.md` uses `text/template` and produces a Markdown file. For example, this
-line in `templates/README.md` links to the public key:
-
-```markdown
-Download [the repository key]({{.BaseURL}}/KEY.gpg).
-```
-
-The builder requires `templates/index.html`. It omits the rendered `README.md`
-if `templates/README.md` is absent. Template parse errors or unknown fields fail
-the site build.
+The builder requires `templates/index.html`. Template parse errors or unknown
+fields fail the site build.
 
 ## Docker compatibility tests
 

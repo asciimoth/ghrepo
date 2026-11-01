@@ -711,7 +711,6 @@ func TestChangeSiteOnExistingRepository(t *testing.T) {
 				"deb.list":   tt.site + "/deb/ ./",
 				"rpm.repo":   "baseurl=" + tt.site + "/rpm/",
 				"setup.sh":   tt.site + "/KEY.gpg",
-				"README.md":  tt.site + "/" + m.Packages[0].Path,
 				"index.html": `href="` + m.Packages[0].Path + `"`,
 			} {
 				if !strings.Contains(string(mustRead(t, filepath.Join(output, name))), fragment) {

@@ -379,7 +379,11 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	if err := os.MkdirAll(filepath.Join(dir, "templates"), 0755); err != nil {
 		return err
 	}
-	for _, item := range site.DefaultTemplates {
+	templates, err := site.TemplatesFor(r.Repository.URL)
+	if err != nil {
+		return err
+	}
+	for _, item := range templates {
 		if err := createIfAbsent(filepath.Join(dir, "templates", item.Name), func() ([]byte, error) {
 			return []byte(item.Text), nil
 		}, 0644); err != nil {

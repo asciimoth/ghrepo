@@ -75,6 +75,11 @@ func TestInitRepoAndSiteURLs(t *testing.T) {
 			if r.Repository.URL != tt.repo || r.Site.BaseURL != tt.site || r.Site.CNAME != tt.cname {
 				t.Fatalf("got repo %q, site %q, and CNAME %q; want %q, %q, and %q", r.Repository.URL, r.Site.BaseURL, r.Site.CNAME, tt.repo, tt.site, tt.cname)
 			}
+			owner := strings.Split(strings.TrimPrefix(tt.repo, "https://github.com/"), "/")[0]
+			page := string(mustRead(t, filepath.Join(dir, "templates", "index.html")))
+			if !strings.Contains(page, ">"+owner+"</a>") || strings.Contains(page, "__GHREPO_OWNER__") {
+				t.Fatal("default page does not show the repository owner")
+			}
 		})
 	}
 }

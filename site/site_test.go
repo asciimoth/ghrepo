@@ -96,7 +96,11 @@ func makeFixture(t *testing.T) fixture {
 	if err := os.Mkdir(filepath.Join(checkout, "templates"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, item := range DefaultTemplates {
+	templates, err := TemplatesFor(r.Repository.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range templates {
 		if err := os.WriteFile(filepath.Join(checkout, "templates", item.Name), []byte(item.Text), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -149,7 +153,7 @@ func TestBuildFromCleanCheckout(t *testing.T) {
 	if err := Build(context.Background(), f.checkout, f.output, f.fetcher); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"KEY.gpg": true, "index.html": true, "README.md": true, "setup.sh": true, "deb.list": true, "rpm.repo": true, "deb/Packages": true, "deb/Packages.gz": true, "deb/Release": true, "deb/InRelease": true, "rpm/repodata/repomd.xml": true, "rpm/repodata/repomd.xml.asc": true}
+	want := map[string]bool{"KEY.gpg": true, "index.html": true, "setup.sh": true, "deb.list": true, "rpm.repo": true, "deb/Packages": true, "deb/Packages.gz": true, "deb/Release": true, "deb/InRelease": true, "rpm/repodata/repomd.xml": true, "rpm/repodata/repomd.xml.asc": true}
 	for _, p := range f.manifest.Packages {
 		want[p.Path] = true
 	}
@@ -175,7 +179,7 @@ func TestBuildFromCleanCheckout(t *testing.T) {
 			return errors.New("unexpected site file: " + rel)
 		}
 		delete(want, rel)
-		if rel != "index.html" && rel != "README.md" && rel != "setup.sh" && rel != "deb.list" && rel != "rpm.repo" {
+		if rel != "index.html" && rel != "setup.sh" && rel != "deb.list" && rel != "rpm.repo" {
 			origin := filepath.Join(f.checkout, rel)
 			if strings.HasSuffix(rel, ".deb") || strings.HasSuffix(rel, ".rpm") {
 				for _, p := range f.manifest.Packages {
@@ -205,6 +209,29 @@ func TestBuildFromCleanCheckout(t *testing.T) {
 	}
 	if !strings.Contains(string(mustRead(t, filepath.Join(f.output, "deb.list"))), f.repo.Site.BaseURL+"/deb/ ./") {
 		t.Fatal("wrong APT source URL")
+	}
+	page := string(mustRead(t, filepath.Join(f.output, "index.html")))
+	for _, fragment := range []string{
+		"background: #1e1e2e",
+		`href="https://github.com/example/repo/.."`,
+		`>example</a>`,
+		`href="https://github.com/example/repo"`,
+		`href="KEY.gpg" download`,
+		`href="https://github.com/asciimoth/ghrepo"`,
+		`href="deb.list"`,
+		`href="rpm.repo"`,
+		"sudo apt install PACKAGE_NAME",
+		"sudo dnf install PACKAGE_NAME",
+		"/usr/share/keyrings/example-archive-keyring.gpg",
+	} {
+		if !strings.Contains(page, fragment) {
+			t.Errorf("packages page does not contain %q", fragment)
+		}
+	}
+	for _, p := range f.manifest.Packages {
+		if !strings.Contains(page, `href="`+p.Path+`"`) {
+			t.Errorf("packages page does not link to %s", p.Path)
+		}
 	}
 	if out, err := exec.Command("sh", "-n", filepath.Join(f.output, "setup.sh")).CombinedOutput(); err != nil {
 		t.Fatalf("invalid setup script: %v: %s", err, out)
@@ -282,6 +309,12 @@ func TestRetainedFilesStayOutsideIndexes(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(f.output, p.Path)); err != nil {
 			t.Fatal(err)
 		}
+		if strings.Contains(string(mustRead(t, filepath.Join(f.output, "index.html"))), `href="`+p.Path+`"`) {
+			t.Fatalf("retained package appears on packages page: %s", p.Path)
+		}
+	}
+	if !strings.Contains(string(mustRead(t, filepath.Join(f.output, "index.html"))), "No packages are available yet.") {
+		t.Fatal("empty packages page has no message")
 	}
 	if strings.Contains(string(mustRead(t, filepath.Join(f.output, "deb", "Packages"))), "hello") {
 		t.Fatal("retained DEB appears in index")
