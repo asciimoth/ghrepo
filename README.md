@@ -40,6 +40,11 @@ sudo dnf makecache
 sudo dnf install ghrepo
 ```
 
+### GitHub Releases
+
+Download a Linux `amd64` or `arm64` binary archive from the
+[ghrepo GitHub Releases page](https://github.com/asciimoth/ghrepo/releases).
+
 ### Nix
 
 Install the CLI with Nix:
