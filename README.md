@@ -334,6 +334,10 @@ files from the committed templates.
 shows APT and DNF setup commands, active packages, the GitHub owner and source
 repository, the public PGP key, and a link to ghrepo.
 
+![Default packages page with fictional sample data](docs/packages-page-preview.png)
+
+The preview uses fictional package data and URLs under `example.invalid`.
+
 The setup commands use `deb.list` and `rpm.repo` from the site. Installed files
 and the DNF repository ID use a name derived from the repository owner and name.
 `init` writes the owner name into the default template from the repository URL.
