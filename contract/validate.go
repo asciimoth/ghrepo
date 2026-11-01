@@ -215,6 +215,24 @@ func (m Manifest) Validate(r Repository) error {
 		if err := ValidateSourceURL(p.URL, r.Downloads.SourceHosts); err != nil {
 			return fmt.Errorf("package %d: %w", n, err)
 		}
+		if p.SourceURL != "" {
+			if err := validateHTTPSBase(p.SourceURL); err != nil {
+				return fmt.Errorf("package %d: invalid source_url", n)
+			}
+		}
+		if len(p.Comment) > 4096 || strings.IndexFunc(p.Comment, unicode.IsControl) >= 0 {
+			return fmt.Errorf("package %d: invalid comment", n)
+		}
+		if len(p.Tags) > 32 {
+			return fmt.Errorf("package %d: too many tags", n)
+		}
+		tags := map[string]bool{}
+		for _, tag := range p.Tags {
+			if len(tag) > 64 || !safeComponent(tag, false) || tags[tag] {
+				return fmt.Errorf("package %d: invalid or duplicate tag", n)
+			}
+			tags[tag] = true
+		}
 		if p.Source != "upstream" && p.Source != "owned" {
 			return fmt.Errorf("package %d: invalid source ownership", n)
 		}

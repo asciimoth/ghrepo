@@ -57,7 +57,7 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		return err
 	}
 	if len(args) == 0 {
-		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build|readme-build")
+		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|metadata set|remove|prune|rebuild|check|publish|gc|site-build|readme-build")
 	}
 	if command, ok := helpCommand(args); ok {
 		return c.printHelp(command)
@@ -84,6 +84,11 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 			return c.sourceSet(ctx, args[2:])
 		}
 		return errors.New("usage: ghrepo source set SELECTOR URL")
+	case "metadata":
+		if len(args) > 1 && args[1] == "set" {
+			return c.metadataSet(args[2:])
+		}
+		return errors.New("usage: ghrepo metadata set [OPTIONS] SELECTOR")
 	case "remove":
 		return c.remove(args[1:])
 	case "prune":
@@ -681,9 +686,20 @@ func (c Runner) add(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("add requires URLs")
 	}
-	if args[0] == "--upload" || args[0] == "--sign-rpm" {
-		return c.addUpload(ctx, args)
+	for _, arg := range args {
+		if arg == "--upload" || arg == "--sign-rpm" {
+			return c.addUpload(ctx, args)
+		}
 	}
+	fs := flag.NewFlagSet("add", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var options metadataOptions
+	options.flags(fs)
+	if err := fs.Parse(args); err != nil || fs.NArg() == 0 {
+		return errors.New("add requires URLs")
+	}
+	options.mark(fs)
+	args = fs.Args()
 	if c.dryRun {
 		r, m, err := c.load()
 		if err != nil {
@@ -702,6 +718,13 @@ func (c Runner) add(ctx context.Context, args []string) error {
 			before := len(m.Packages)
 			if err := addOne(ctx, raw, dir, r, &m, fetcher, -1, time.Time{}); err != nil {
 				return err
+			}
+			if len(m.Packages) > before {
+				c.enrichGitHub(ctx, &m.Packages[before])
+				options.apply(&m.Packages[before])
+				if err := m.Validate(r); err != nil {
+					return err
+				}
 			}
 			if len(m.Packages) == before {
 				continue
@@ -726,7 +749,21 @@ func (c Runner) add(ctx context.Context, args []string) error {
 		fetcher = cache.HTTPFetcher{}
 	}
 	for _, raw := range args {
+		before := len(m.Packages)
 		if err := addOne(ctx, raw, dir, r, &m, fetcher, -1, time.Time{}); err != nil {
+			return err
+		}
+		if len(m.Packages) > before {
+			c.enrichGitHub(ctx, &m.Packages[before])
+			options.apply(&m.Packages[before])
+		} else if len(options.set) > 0 {
+			for i := range m.Packages {
+				if m.Packages[i].State == "active" && m.Packages[i].URL == raw {
+					options.apply(&m.Packages[i])
+				}
+			}
+		}
+		if err := m.Validate(r); err != nil {
 			return err
 		}
 	}

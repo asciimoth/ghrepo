@@ -60,6 +60,9 @@ type Manifest struct {
 type Package struct {
 	Path       string   `yaml:"path"`
 	URL        string   `yaml:"url"`
+	Comment    string   `yaml:"comment,omitempty"`
+	SourceURL  string   `yaml:"source_url,omitempty"`
+	Tags       []string `yaml:"tags,omitempty"`
 	SHA256     string   `yaml:"sha256"`
 	Size       int64    `yaml:"size"`
 	Source     string   `yaml:"source"`

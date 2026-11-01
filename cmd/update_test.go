@@ -26,8 +26,12 @@ func TestUpdateGitHubRelease(t *testing.T) {
 	lookupCount := 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		lookupCount++
-		if r.URL.Path != "/repos/example/project/releases/latest" {
+		if r.URL.Path != "/repos/example/project/releases/latest" && r.URL.Path != "/repos/example/project" {
 			t.Errorf("wrong API path: %s", r.URL.Path)
+		}
+		if r.URL.Path == "/repos/example/project" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"description": "Hello package", "topics": []string{"tools"}})
+			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v2.0.0-1", "assets": []map[string]string{{"name": "hello_2.0.0-1_amd64.deb", "browser_download_url": newURL, "state": "uploaded"}}})
 	}))
@@ -78,7 +82,7 @@ func TestUpdateGitHubRelease(t *testing.T) {
 	if err := m.Validate(r); err != nil {
 		t.Fatal(err)
 	}
-	if lookupCount != 2 {
+	if lookupCount < 2 {
 		t.Fatal(lookupCount)
 	}
 	beforeRepeat, err := os.ReadFile(manifestPath)

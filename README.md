@@ -100,6 +100,8 @@ the repository or its cache. `update` does not publish or push.
 ```sh
 ghrepo init --repo example/repo --source-hosts github.com
 ghrepo add https://github.com/OWNER/REPO/releases/download/v1.0/app_1.0_amd64.deb
+ghrepo add --comment "Example package" --tags cli,tools https://github.com/OWNER/REPO/releases/download/v1.0/app_1.0_amd64.deb
+ghrepo metadata set --comment "Updated description" deb/APP/amd64/VERSION
 ghrepo update --dry-run
 ghrepo update
 ```

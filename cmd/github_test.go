@@ -151,14 +151,14 @@ func TestGitHubCommandsOffline(t *testing.T) {
 	if uploadCalls != 0 || !bytes.Equal(beforeUpload, mustRead(t, filepath.Join(dir, "packages.yaml"))) {
 		t.Fatal("dry upload changed remote or manifest")
 	}
-	if err := c.Run(ctx, []string{"add", "--upload", "input.deb"}); err != nil {
+	if err := c.Run(ctx, []string{"add", "--upload", "--comment", "Uploaded package", "--tags", "cli", "input.deb"}); err != nil {
 		t.Fatal(err)
 	}
 	manifest, err := contract.ReadManifest(filepath.Join(dir, "packages.yaml"), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Packages) != 1 || manifest.Packages[0].Source != "owned" || manifest.Packages[0].URL != publicURL || uploadedName == "" {
+	if len(manifest.Packages) != 1 || manifest.Packages[0].Source != "owned" || manifest.Packages[0].URL != publicURL || manifest.Packages[0].Comment != "Uploaded package" || len(manifest.Packages[0].Tags) != 1 || manifest.Packages[0].Tags[0] != "cli" || uploadedName == "" {
 		t.Fatalf("wrong manifest: %+v", manifest)
 	}
 	for _, name := range []string{"ghrepo.yaml", "packages.yaml", ".github/workflows/pages.yml"} {

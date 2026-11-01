@@ -196,6 +196,14 @@ func (c Runner) update(ctx context.Context, args []string) error {
 			_, _ = fmt.Fprintf(report, "%s: latest release %s already added\n", old.Path, release.Tag)
 			continue
 		}
+		newEntry := &m.Packages[before]
+		newEntry.Comment = old.Comment
+		newEntry.SourceURL = old.SourceURL
+		newEntry.Tags = append([]string(nil), old.Tags...)
+		c.enrichGitHub(ctx, newEntry)
+		if err := m.Validate(r); err != nil {
+			return err
+		}
 		added := m.Packages[before]
 		if *dry {
 			_, _ = fmt.Fprintf(report, "%s: current %s, latest %s (release %s): %s\n", old.Path, old.Identity.Version, added.Identity.Version, release.Tag, assetURL)

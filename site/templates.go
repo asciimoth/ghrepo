@@ -73,9 +73,12 @@ var DefaultTemplates = []SourceTemplate{
     pre { overflow-x: auto; margin: 1rem 0 0; border: 1px solid #45475a; border-radius: 0.5rem; background: #181825; padding: 1rem; color: #cdd6f4; font-size: 0.85rem; line-height: 1.65; tab-size: 2; }
     code { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
     .packages { display: grid; gap: 0.75rem; list-style: none; margin: 1.25rem 0 0; padding: 0; }
-    .package { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.25rem 1rem; border: 1px solid #45475a; border-radius: 0.5rem; background: #313244; padding: 0.9rem 1rem; }
+    .package { border: 1px solid #45475a; border-radius: 0.5rem; background: #313244; padding: 0.9rem 1rem; }
+    .package-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.25rem 1rem; }
     .package a { font-weight: 600; overflow-wrap: break-word; overflow-wrap: anywhere; }
     .package span { color: #a6adc8; font-size: 0.9rem; }
+    .package p { margin: 0.4rem 0 0; color: #bac2de; }
+    .package .tags { color: #a6e3a1; font-size: 0.85rem; }
     footer { border-top: 1px solid #45475a; padding-block: 1.5rem; color: #a6adc8; font-size: 0.9rem; }
     footer p { margin: 0; }
     @media (max-width: 40rem) {
@@ -133,7 +136,7 @@ sudo dnf install PACKAGE_NAME</code></pre>
     <section class="section" id="packages" aria-labelledby="packages-title">
       <h2 id="packages-title">Available packages</h2>
       <ul class="packages">{{$active := false}}{{range .Packages}}{{if eq .State "active"}}{{$active = true}}
-        <li class="package"><a href="{{.Path}}">{{.Identity.Name}} {{.Identity.Version}}</a><span>{{.Format}} · {{.Identity.Architecture}}</span></li>{{end}}{{end}}{{if not $active}}
+        <li class="package"><div class="package-heading"><a href="{{.Path}}">{{.Identity.Name}} {{.Identity.Version}}</a><span>{{.Format}} · {{.Identity.Architecture}}</span></div>{{if .Comment}}<p>{{.Comment}}</p>{{end}}{{if .SourceURL}}<p><a href="{{.SourceURL}}">Source</a></p>{{end}}{{if .Tags}}<p class="tags">Tags: {{range $i, $tag := .Tags}}{{if $i}}, {{end}}{{$tag}}{{end}}</p>{{end}}</li>{{end}}{{end}}{{if not $active}}
         <li class="package">No packages are available yet.</li>{{end}}
       </ul>
     </section>

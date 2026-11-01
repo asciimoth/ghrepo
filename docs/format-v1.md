@@ -84,6 +84,9 @@ packages:
     size: 506
     source: upstream
     state: active
+    comment: Example package
+    source_url: https://github.com/example/project
+    tags: [example, cli]
     format: deb
     identity:
       name: hello
@@ -99,6 +102,17 @@ UTC timestamp set when it leaves the active index. A retained package remains at
 its path for at least `site.retention_days` after that time. The minimum
 configurable retention period is 30 days. Prune must also preserve packages
 referenced by any retained signed index or rollback state.
+
+`comment`, `source_url`, and `tags` are optional display metadata. `source_url`
+is an HTTPS page URL. Tags are unique short identifiers. Use
+`ghrepo add --comment TEXT --source-url URL --tags tag1,tag2 PACKAGE_URL` to set
+these fields for new packages. Use
+`ghrepo metadata set [--comment TEXT] [--source-url URL] [--tags tag1,tag2] SELECTOR`
+to change an existing entry. An empty value clears a field. A new version from
+`update` or `replace` keeps its predecessor's metadata. For a direct GitHub
+release asset URL, `add` sets `source_url` to the GitHub repository and tries to
+fetch its description and topics. A failed lookup is reported and does not stop
+the package operation.
 
 `format` is `deb` or `rpm`. Identity fields come from inspected package
 metadata. DEB identity is `(name, version, architecture)`; its version includes

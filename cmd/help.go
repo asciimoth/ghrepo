@@ -14,6 +14,7 @@ Commands:
   replace       Replace a package and retain its old path
   sync          Download and verify packages
   source set    Change a package source URL
+  metadata set  Change a package comment, source URL, or tags
   remove        Mark packages as retained
   prune         List or remove eligible retained packages
   rebuild       Build signed repository metadata
@@ -33,11 +34,12 @@ Run "ghrepo COMMAND --help" for command usage.
 
 var commandHelp = map[string]string{
 	"init":         "Usage: ghrepo init [DIR] [--repo USER/REPO] [--site URL] [--branch NAME] [--source-hosts HOSTS] [--redirect-hosts HOSTS] [--key-id ID] [--create-remote] [--configure-pages] [--dry-run]",
-	"add":          "Usage: ghrepo add [--dry-run] URL...\n       ghrepo add --upload [--sign-rpm] [--dry-run] FILE...",
+	"add":          "Usage: ghrepo add [--comment TEXT] [--source-url URL] [--tags TAGS] [--dry-run] URL...\n       ghrepo add --upload [--sign-rpm] [--comment TEXT] [--source-url URL] [--tags TAGS] [--dry-run] FILE...",
 	"update":       "Usage: ghrepo update [--dry-run]",
 	"replace":      "Usage: ghrepo replace [--dry-run] SELECTOR URL",
 	"sync":         "Usage: ghrepo sync [--dry-run]",
 	"source set":   "Usage: ghrepo source set [--dry-run] SELECTOR URL",
+	"metadata set": "Usage: ghrepo metadata set [--comment TEXT] [--source-url URL] [--tags TAGS] [--dry-run] SELECTOR",
 	"remove":       "Usage: ghrepo remove [--dry-run] SELECTOR...",
 	"prune":        "Usage: ghrepo prune [--apply] [--dry-run]",
 	"rebuild":      "Usage: ghrepo rebuild [--dry-run]",
@@ -56,12 +58,18 @@ func helpCommand(args []string) (string, bool) {
 		if args[1] == "source" {
 			return "source set", true
 		}
+		if args[1] == "metadata" {
+			return "metadata set", true
+		}
 		return args[1], true
 	}
 	for _, arg := range args[1:] {
 		if arg == "--help" || arg == "-h" {
 			if args[0] == "source" {
 				return "source set", true
+			}
+			if args[0] == "metadata" {
+				return "metadata set", true
 			}
 			return args[0], true
 		}

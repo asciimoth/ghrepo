@@ -73,9 +73,12 @@ func (c Runner) addUpload(ctx context.Context, args []string) error {
 	fs.SetOutput(io.Discard)
 	upload := fs.Bool("upload", false, "upload local package files")
 	sign := fs.Bool("sign-rpm", false, "sign an RPM copy before upload")
+	var options metadataOptions
+	options.flags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	options.mark(fs)
 	if !*upload || fs.NArg() == 0 {
 		return errors.New("usage: ghrepo add --upload [--sign-rpm] FILE")
 	}
@@ -120,7 +123,7 @@ func (c Runner) addUpload(ctx context.Context, args []string) error {
 		return nil
 	}
 	for _, file := range fs.Args() {
-		if err := c.uploadOne(ctx, file, *sign, g, r, local, &m); err != nil {
+		if err := c.uploadOne(ctx, file, *sign, g, r, local, &m, options); err != nil {
 			return err
 		}
 	}
@@ -130,7 +133,7 @@ func (c Runner) addUpload(ctx context.Context, args []string) error {
 	return os.RemoveAll(filepath.Join(c.root(), ".ghrepo-upload"))
 }
 
-func (c Runner) uploadOne(ctx context.Context, file string, sign bool, g *storage.GitHub, r contract.Repository, local contract.Local, m *contract.Manifest) error {
+func (c Runner) uploadOne(ctx context.Context, file string, sign bool, g *storage.GitHub, r contract.Repository, local contract.Local, m *contract.Manifest, options metadataOptions) error {
 	info, err := os.Lstat(file)
 	if err != nil {
 		return err
@@ -250,7 +253,9 @@ func (c Runner) uploadOne(ctx context.Context, file string, sign bool, g *storag
 	if existing >= 0 {
 		m.Packages[existing].URL = p.URL
 		m.Packages[existing].Source = "owned"
+		options.apply(&m.Packages[existing])
 	} else {
+		options.apply(&p)
 		m.Packages = append(m.Packages, p)
 	}
 	return m.Validate(r)

@@ -380,6 +380,10 @@ func TestPinnedBuilderRerunAfterMainMoves(t *testing.T) {
 	if err := c.Run(context.Background(), []string{"rebuild"}); err != nil {
 		t.Fatal(err)
 	}
+	// This test runs an older pinned builder. Use a template supported by that revision.
+	if err := os.WriteFile(filepath.Join(dataDir, "templates", "index.html"), []byte("<html><body>{{range .Packages}}{{.Identity.Name}}{{end}}</body></html>\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	command(t, dataDir, "git", "init")
 	command(t, dataDir, "git", "add", "ghrepo.yaml", "packages.yaml", "KEY.gpg", "deb", "rpm", ".github", "templates")
 	command(t, dataDir, "git", "-c", "commit.gpgsign=false", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "site inputs")

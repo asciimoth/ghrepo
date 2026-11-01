@@ -53,6 +53,14 @@ func (c Runner) replacePackage(ctx context.Context, args []string) error {
 	if err := addOne(ctx, args[1], dir, r, &m, fetcher, i, c.now()); err != nil {
 		return err
 	}
+	newEntry := &m.Packages[len(m.Packages)-1]
+	newEntry.Comment = m.Packages[i].Comment
+	newEntry.SourceURL = m.Packages[i].SourceURL
+	newEntry.Tags = append([]string(nil), m.Packages[i].Tags...)
+	c.enrichGitHub(ctx, newEntry)
+	if err := m.Validate(r); err != nil {
+		return err
+	}
 	newPackage := m.Packages[len(m.Packages)-1]
 	if newPackage.Format == "rpm" && r.RPM.PackageSignature == "trusted-packages" {
 		keys := make([]string, len(r.RPM.TrustedKeyPaths))
