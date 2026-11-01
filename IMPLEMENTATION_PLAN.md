@@ -218,12 +218,11 @@ are no longer referenced by the current `repomd.xml` or a protected rollback
 state. Do not use local file modification times as the retention record. Test
 the age boundary, checksum checks, and Git staging of expired file deletions.
 
-Pin the site builder used by the generated Pages workflow to an immutable tool
-revision, or build it from the checked-out source when that source is present.
-The workflow must build the triggering repository commit with a known builder
-version, without fetching the moving `main` branch of `ghrepo`. Test the
-generated workflow and a rebuild of the same commit after `main` changes.
+Use the latest published ghrepo release in the generated Pages workflow. Embed
+the release public key in the workflow and verify the downloaded archive's
+detached GPG signature before running the site builder. Test the generated
+workflow and signature check.
 
 **Done when:** pruning and replacement preserve all required old package paths,
 expired RPM metadata leaves the site only after its retention window, and the
-same committed inputs use the same builder revision on every workflow rerun.
+every workflow run uses a verified release archive.

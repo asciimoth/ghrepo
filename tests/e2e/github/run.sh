@@ -149,7 +149,7 @@ path = Path(sys.argv[1])
 repo = sys.argv[2]
 digest = sys.argv[3]
 workflow = path.read_text()
-start_marker = "      - name: Build site from this commit or pinned builder\n"
+start_marker = "      - name: Build site with signed ghrepo release\n"
 end_marker = "      - uses: actions/upload-pages-artifact@v3\n"
 if workflow.count(start_marker) != 1 or workflow.count(end_marker) != 1:
     raise SystemExit("generated Pages workflow has an unexpected build step")

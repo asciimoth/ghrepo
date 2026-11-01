@@ -72,6 +72,12 @@ after you publish to the selected branch. For a repository that does not exist
 yet, pass `--create-remote` and `--configure-pages` to `init` to create it and
 select GitHub Actions for Pages. Set `GH_TOKEN` for those API calls.
 
+The generated Pages workflow downloads the latest published ghrepo release for
+Linux amd64. It verifies the archive signature with the release public key
+embedded in the workflow before it runs the binary. If the release signing key
+changes, update the generated workflow in each repository. Existing repositories
+keep their committed workflow until you replace it with a newly generated one.
+
 ## Local manifest commands
 
 Build the `ghrepo` binary with `just build`, or run a command from the source

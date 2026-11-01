@@ -2,3 +2,6 @@
 fpr = "fpr"
 ghrepo = "ghrepo"
 
+[files]
+extend-exclude = ["cmd/release-public-key.asc"]
+

@@ -330,8 +330,9 @@ staged path outside the allowlist. The allowlist contains shared configuration,
 generated signed metadata. It excludes local settings, `.env`, cache,
 transaction records, and build output even when ignore rules change.
 
-The generated Pages workflow builds from the triggering commit when its checkout
-contains the ghrepo Go module. A data-only checkout uses a fixed ghrepo commit
-revision recorded in the workflow. Its build job uploads only `build/site/`. Its
-deploy job uses the `github-pages` environment and grants `pages: write` and
-`id-token: write` permissions.
+The generated Pages workflow downloads the Linux amd64 archive from the latest
+published ghrepo release. It verifies the archive's detached GPG signature with
+the release public key embedded in the workflow before it runs `site-build`. Its
+build job uploads only `build/site/`. Its deploy job uses the `github-pages`
+environment and grants `pages: write` and `id-token: write` permissions. A
+workflow rerun can use a newer ghrepo release.

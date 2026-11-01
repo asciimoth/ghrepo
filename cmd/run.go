@@ -4,6 +4,7 @@ package cmd
 import (
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -988,24 +989,34 @@ func selectOne(m contract.Manifest, s string) (int, error) {
 	return index, nil
 }
 
-// This revision contains the manifest rules used by generated data-only sites.
-const siteBuilderRevision = "d515279a6ac6145aea1e299f51a781c1a89c1272"
+// releasePublicKey is the release signing key C5C84658CCFD7E8E71DEE933AF3AE54FC3A35C9F.
+//
+//go:embed release-public-key.asc
+var releasePublicKey string
 
 func workflowFor(r contract.Repository) string {
+	key := strings.ReplaceAll(strings.TrimSpace(releasePublicKey), "\n", "\n          ")
 	return "name: Pages\n" +
 		"on:\n  push:\n    branches: [\"" + r.Repository.Branch + "\"]\n  workflow_dispatch:\n" +
 		"concurrency:\n  group: pages-" + r.Repository.Branch + "\n  cancel-in-progress: false\n" +
 		"permissions:\n  contents: read\n" +
 		"jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n" +
 		"      - uses: actions/checkout@v4\n" +
-		"      - uses: actions/setup-go@v5\n        with:\n          go-version: '1.25.5'\n" +
-		"      - name: Build site from this commit or pinned builder\n" +
+		"      - name: Build site with signed ghrepo release\n" +
 		"        run: |\n" +
-		"          if [ -f go.mod ] && grep -qx 'module github.com/asciimoth/ghrepo' go.mod; then\n" +
-		"            go run . site-build\n" +
-		"          else\n" +
-		"            go run github.com/asciimoth/ghrepo@" + siteBuilderRevision + " site-build\n" +
-		"          fi\n" +
+		"          set -euo pipefail\n" +
+		"          release=$(curl -fsSL --retry 5 -H 'Authorization: Bearer ${{ github.token }}' https://api.github.com/repos/asciimoth/ghrepo/releases/latest)\n" +
+		"          asset_url=$(jq -er '[.assets[] | select(.name | startswith(\"ghrepo_\") and endswith(\"_linux_amd64.tar.gz\"))] | if length == 1 then .[0].browser_download_url else error(\"expected one Linux amd64 archive\") end' <<<\"$release\")\n" +
+		"          work_dir=$(mktemp -d)\n" +
+		"          curl -fsSL --retry 5 -o \"$work_dir/ghrepo.tar.gz\" \"$asset_url\"\n" +
+		"          curl -fsSL --retry 5 -o \"$work_dir/ghrepo.tar.gz.sig\" \"$asset_url.sig\"\n" +
+		"          cat > \"$work_dir/release-key.asc\" <<'GHREPO_RELEASE_KEY'\n" +
+		"          " + key + "\n" +
+		"          GHREPO_RELEASE_KEY\n" +
+		"          gpg --batch --dearmor --output \"$work_dir/release-key.gpg\" \"$work_dir/release-key.asc\"\n" +
+		"          gpgv --keyring \"$work_dir/release-key.gpg\" \"$work_dir/ghrepo.tar.gz.sig\" \"$work_dir/ghrepo.tar.gz\"\n" +
+		"          tar -xzf \"$work_dir/ghrepo.tar.gz\" -C \"$work_dir\" ghrepo\n" +
+		"          \"$work_dir/ghrepo\" site-build\n" +
 		"      - uses: actions/upload-pages-artifact@v3\n        with:\n          path: build/site\n" +
 		"  deploy:\n    needs: build\n    runs-on: ubuntu-latest\n" +
 		"    environment:\n      name: github-pages\n      url: ${{ steps.deployment.outputs.page_url }}\n" +
