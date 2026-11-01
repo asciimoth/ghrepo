@@ -4,7 +4,8 @@ Tool for hosting DEB and RPM repositories on GitHub Pages.
 
 ## Local manifest commands
 
-After building the `ghrepo` binary with `go build -o ghrepo .`, initialize a
+Build the `ghrepo` binary with `just build`, or run a command from the source
+tree with `just run <command> [args]`. To use the commands below, initialize a
 repository with public URLs, then add packages by HTTPS URL:
 
 ```sh
@@ -33,31 +34,30 @@ ghrepo --repo-dir /home/user/otherrepo add --upload ./myproject.deb
 ```
 
 Package file paths stay relative to the current directory. Repository files,
-cache, metadata, and Git operations use the selected repository directory.
-Use `--dry-run` with `init`, `add` (including `--upload`), `replace`, `sync`,
+cache, metadata, and Git operations use the selected repository directory. Use
+`--dry-run` with `init`, `add` (including `--upload`), `replace`, `sync`,
 `source set`, `remove`, `prune --apply`, `rebuild`, `check`, or `site-build` to
 preview the command without changing repository files or sending mutation
 requests. For example, `ghrepo add --upload --dry-run ./myproject.deb` checks
 the package file and reports the planned upload. `update` and `publish` also
-accept `--dry-run` as described below.
-`init --repo` still specifies the GitHub repository URL. `add` updates only
-`packages.yaml` and the ignored verified cache. `source set` verifies the new
-URL against the stored size and SHA-256 before it changes the manifest. `remove`
-marks an entry as retained. These commands do not publish or push. The `rebuild`
-command verifies cached package bytes, signs new APT and RPM indexes, verifies
-both indexes with `KEY.gpg`, and replaces the prior metadata as one recoverable
-transaction. `replace` checks new bytes with the same package identity and
-retains the old served path. `prune` previews retained paths that have passed
-the configured retention period and have no signed index or rollback reference;
-`--apply` removes these paths from the manifest. `check` checks source URLs,
-signatures, indexed package bytes, and the rendered site size. `update` checks
-active upstream packages whose source is a direct
-`https://github.com/OWNER/REPO/releases/download/TAG/ASSET` URL. It uses the
-repository's latest published GitHub release and selects an asset with the same
-name, or a name formed by replacing the old tag or package version. It downloads
-matching assets, verifies the package format, name, and architecture, and adds
-new versions to `packages.yaml`. Unsupported URLs and releases without a
-matching asset are reported and skipped. `update --dry-run` downloads matching
+accept `--dry-run` as described below. `init --repo` still specifies the GitHub
+repository URL. `add` updates only `packages.yaml` and the ignored verified
+cache. `source set` verifies the new URL against the stored size and SHA-256
+before it changes the manifest. `remove` marks an entry as retained. These
+commands do not publish or push. The `rebuild` command verifies cached package
+bytes, signs new APT and RPM indexes, verifies both indexes with `KEY.gpg`, and
+replaces the prior metadata as one recoverable transaction. `replace` checks new
+bytes with the same package identity and retains the old served path. `prune`
+previews retained paths that have passed the configured retention period and
+have no signed index or rollback reference; `--apply` removes these paths from
+the manifest. `check` checks source URLs, signatures, indexed package bytes, and
+the rendered site size. `update` checks active upstream packages whose source is
+a direct `https://github.com/OWNER/REPO/releases/download/TAG/ASSET` URL. It
+uses the repository's latest published GitHub release and selects an asset with
+the same name, or a name formed by replacing the old tag or package version. It
+downloads matching assets, verifies the package format, name, and architecture,
+and adds new versions to `packages.yaml`. Unsupported URLs and releases without
+a matching asset are reported and skipped. `update --dry-run` downloads matching
 assets to a temporary file and reports their package versions without changing
 the repository or its cache. `update` does not publish or push.
 
@@ -70,11 +70,10 @@ ghrepo update
 
 `publish --dry-run` runs `sync`, `rebuild`, and `check` in a temporary copy,
 then prints the exact Git path changes without changing repository files,
-committing, or pushing. `publish` stages only the
-configuration, templates, public keys, manifest, workflow, and signed metadata.
-It commits and pushes to `origin`. The ignored `.ghrepo-transaction/` directory
-records interrupted metadata swaps and is restored on the next `rebuild` or
-`check`.
+committing, or pushing. `publish` stages only the configuration, templates,
+public keys, manifest, workflow, and signed metadata. It commits and pushes to
+`origin`. The ignored `.ghrepo-transaction/` directory records interrupted
+metadata swaps and is restored on the next `rebuild` or `check`.
 
 `init` accepts `user/repo` or a full GitHub HTTPS URL for `--repo`. It stores
 the full URL in `ghrepo.yaml`. If `--site` is absent, it uses

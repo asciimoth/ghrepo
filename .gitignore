@@ -55,6 +55,7 @@ go.work.sum
 /almagestd
 /cli
 /build
+/ghrepo
 /dist
 
 almagest-subprogram-launcher

@@ -1,4 +1,5 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
+set positional-arguments := true
 
 # Run all project checks.
 check: tidy typos fmt lint vet test test-e2e fuzz
@@ -47,9 +48,13 @@ fuzz fuzztime=env_var_or_default('FUZZ_TIME', '5s') fuzzparallel=env_var_or_defa
     done < <(rg --line-number --no-heading --replace '$1' '^func (Fuzz[[:alnum:]_]+)\(.*$' --glob '*_test.go' 2>/dev/null); \
     if ((found == 0)); then printf 'No Go fuzz targets found.\n'; fi
 
-# Build all packages.
+# Build the ghrepo executable.
 build:
-    go build ./...
+    go build -o ghrepo .
+
+# Run ghrepo with the supplied CLI arguments.
+run *args:
+    go run . "$@"
 
 # Show the available recipes.
 default:
