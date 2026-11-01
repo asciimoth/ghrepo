@@ -95,7 +95,7 @@ func testRPM(changes map[uint32]*rpmTestTag, signature ...*rpmTestTag) []byte {
 
 func TestRPMMetadataCompatibility(t *testing.T) {
 	for _, epoch := range []uint32{0, 2, 4294967295} {
-		for _, arch := range []string{"noarch", "x86_64", "aarch64"} {
+		for _, arch := range []string{"noarch", "x86_64", "aarch64", "i386", "armv6hl", "riscv64gc"} {
 			t.Run(arch+"/epoch="+fmt.Sprint(epoch), func(t *testing.T) {
 				m, err := Bytes(testRPM(map[uint32]*rpmTestTag{
 					rpmutils.EPOCH:          rpmInts(rpmutils.EPOCH, epoch),

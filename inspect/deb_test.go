@@ -117,6 +117,23 @@ func TestDEBControlArchiveCompatibility(t *testing.T) {
 	}
 }
 
+func TestDEBArchitectureCompatibility(t *testing.T) {
+	for _, arch := range []string{"all", "amd64", "arm64", "armhf", "i386", "riscv64gc"} {
+		t.Run(arch, func(t *testing.T) {
+			control := strings.Replace(testControl, "Architecture: amd64", "Architecture: "+arch, 1)
+			data := testDEBEntries(t, []tarEntry{regularEntry("./control", control)})
+			m, err := Bytes(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := contract.Identity{Name: "hello", Version: "1.2.0-1", Architecture: arch}
+			if m.Format != "deb" || m.Identity != want || m.Fields["Architecture"] != arch {
+				t.Fatalf("unexpected metadata: %+v", m)
+			}
+		})
+	}
+}
+
 func standardControlEntries(prefix string) []tarEntry {
 	var entries []tarEntry
 	for _, name := range []string{"md5sums", "conffiles", "triggers", "shlibs", "symbols", "preinst", "postinst", "prerm", "postrm", "config"} {
