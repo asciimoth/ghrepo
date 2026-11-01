@@ -10,8 +10,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/asciimoth/ghrepo/contract"
 )
@@ -22,33 +24,62 @@ type Fetcher interface {
 	Fetch(context.Context, string, []string, []string) (io.ReadCloser, error)
 }
 
-type HTTPFetcher struct{ Client *http.Client }
+type HTTPFetcher struct {
+	Client         *http.Client
+	ConnectTimeout time.Duration
+	RequestTimeout time.Duration
+}
+
+const DefaultConnectTimeout = 10 * time.Second
+const DefaultRequestTimeout = 10 * time.Minute
+
+// RepositoryFetcher applies repository timeouts to the default HTTP fetcher.
+func RepositoryFetcher(fetcher Fetcher, r contract.Repository) Fetcher {
+	if fetcher != nil {
+		return fetcher
+	}
+	return HTTPFetcher{
+		ConnectTimeout: time.Duration(r.Downloads.ConnectTimeoutSeconds) * time.Second,
+		RequestTimeout: time.Duration(r.Downloads.RequestTimeoutSeconds) * time.Second,
+	}
+}
 
 func publicIP(ip net.IP) bool {
 	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast()
 }
 
 func dialPublic(ctx context.Context, network, address string) (net.Conn, error) {
+	return dialPublicWithTimeout(ctx, network, address, DefaultConnectTimeout)
+}
+
+func dialPublicWithTimeout(ctx context.Context, network, address string, timeout time.Duration) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, errors.New("invalid source address")
 	}
-	addresses, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	lookupCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	addresses, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(lookupCtx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("source DNS lookup failed: %w", context.DeadlineExceeded)
+		}
 		return nil, errors.New("source DNS lookup failed")
 	}
 	foundPublic := false
+	var lastErr error
 	for _, address := range addresses {
 		if publicIP(address.IP) {
 			foundPublic = true
-			conn, err := (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort(address.IP.String(), port))
+			conn, err := (&net.Dialer{Timeout: timeout}).DialContext(ctx, network, net.JoinHostPort(address.IP.String(), port))
 			if err == nil {
 				return conn, nil
 			}
+			lastErr = err
 		}
 	}
 	if foundPublic {
-		return nil, errors.New("source connection failed")
+		return nil, fmt.Errorf("source connection failed: %w", lastErr)
 	}
 	return nil, errors.New("source resolves to a private address")
 }
@@ -58,13 +89,25 @@ func (h HTTPFetcher) Fetch(ctx context.Context, raw string, sources, redirects [
 		return nil, err
 	}
 	client := http.Client{}
+	connectTimeout := h.ConnectTimeout
+	if connectTimeout <= 0 {
+		connectTimeout = DefaultConnectTimeout
+	}
 	if h.Client != nil {
 		client = *h.Client
 	} else {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = nil
-		transport.DialContext = dialPublic
+		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			return dialPublicWithTimeout(ctx, network, address, connectTimeout)
+		}
 		client.Transport = transport
+	}
+	if client.Timeout == 0 {
+		client.Timeout = h.RequestTimeout
+		if client.Timeout <= 0 {
+			client.Timeout = DefaultRequestTimeout
+		}
 	}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
@@ -84,7 +127,11 @@ func (h HTTPFetcher) Fetch(ctx context.Context, raw string, sources, redirects [
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, errors.New("source download failed")
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return nil, fmt.Errorf("source download failed: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
@@ -120,7 +167,10 @@ func VerifyFile(name string, p contract.Package) error {
 func verifyReader(input io.Reader, output io.Writer, p contract.Package) error {
 	hash := sha256.New()
 	n, err := io.Copy(io.MultiWriter(output, hash), io.LimitReader(input, p.Size+1))
-	if err != nil || n != p.Size || hex.EncodeToString(hash.Sum(nil)) != p.SHA256 {
+	if err != nil {
+		return fmt.Errorf("read package: %w", err)
+	}
+	if n != p.Size || hex.EncodeToString(hash.Sum(nil)) != p.SHA256 {
 		return errors.New("package has invalid SHA-256 or size")
 	}
 	return nil
@@ -142,7 +192,7 @@ func ensure(ctx context.Context, root string, r contract.Repository, p contract.
 		return "", err
 	}
 	if fetcher == nil {
-		fetcher = HTTPFetcher{}
+		fetcher = RepositoryFetcher(nil, r)
 	}
 	dir := filepath.Join(root, "sha256")
 	name := filepath.Join(dir, p.SHA256)
@@ -156,8 +206,8 @@ func ensure(ctx context.Context, root string, r contract.Repository, p contract.
 	}
 	body, err := fetcher.Fetch(ctx, p.URL, r.Downloads.SourceHosts, r.Downloads.RedirectHosts)
 	if err != nil {
-		if ctx.Err() != nil {
-			return "", ctx.Err()
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return "", fmt.Errorf("source download failed: %w", err)
 		}
 		return "", errors.New("source download failed")
 	}
@@ -176,7 +226,7 @@ func ensure(ctx context.Context, root string, r contract.Repository, p contract.
 	}
 	if err := verifyReader(body, f, p); err != nil {
 		_ = f.Close()
-		return "", errors.New("downloaded package has invalid SHA-256 or size")
+		return "", fmt.Errorf("downloaded package: %w", err)
 	}
 	if err := f.Sync(); err != nil {
 		_ = f.Close()

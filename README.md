@@ -154,7 +154,11 @@ then prints the exact Git path changes without changing repository files,
 committing, or pushing. `publish` stages only the configuration, templates,
 public keys, manifest, workflow, and signed metadata. It commits and pushes to
 `origin`. The ignored `.ghrepo-transaction/` directory records interrupted
-metadata swaps and is restored on the next `rebuild` or `check`.
+metadata swaps and is restored on the next `rebuild` or `check`. `publish`
+reports each stage and each public source check on standard error. Long
+downloads report elapsed time every 15 seconds. In `ghrepo.yaml`, set
+`downloads.connect_timeout_seconds` and `downloads.request_timeout_seconds` to
+change the default 10-second connection and 600-second full request limits.
 
 `init` accepts `user/repo` or a full GitHub HTTPS URL for `--repo`. It stores
 the full URL in `ghrepo.yaml`. If `--site` is absent, it uses

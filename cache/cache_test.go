@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/asciimoth/ghrepo/contract"
 )
@@ -175,5 +176,47 @@ func TestFetcherErrorRedaction(t *testing.T) {
 	_, err = Ensure(context.Background(), t.TempDir(), testConfig(), testEntry("https://source.test/file"), failingFetcher{})
 	if err == nil {
 		t.Fatal("accepted nil response body")
+	}
+}
+
+func TestRequestTimeoutCoversHeadersAndBody(t *testing.T) {
+	for _, phase := range []string{"headers", "body"} {
+		t.Run(phase, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if phase == "body" {
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte("part"))
+					w.(http.Flusher).Flush()
+				}
+				<-req.Context().Done()
+			}))
+			defer server.Close()
+			client := server.Client()
+			transport := client.Transport.(*http.Transport).Clone()
+			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // Local test server only.
+			transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+			}
+			client.Transport = transport
+			fetcher := HTTPFetcher{Client: client, RequestTimeout: 80 * time.Millisecond}
+			start := time.Now()
+			_, err := FetchVerified(context.Background(), t.TempDir(), testConfig(), testEntry("https://source.test/file"), fetcher)
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("want deadline error, got %v", err)
+			}
+			if time.Since(start) > time.Second {
+				t.Fatalf("timeout took too long: %s", time.Since(start))
+			}
+		})
+	}
+}
+
+func TestRepositoryFetcherTimeouts(t *testing.T) {
+	r := testConfig()
+	r.Downloads.ConnectTimeoutSeconds = 3
+	r.Downloads.RequestTimeoutSeconds = 9
+	fetcher, ok := RepositoryFetcher(nil, r).(HTTPFetcher)
+	if !ok || fetcher.ConnectTimeout != 3*time.Second || fetcher.RequestTimeout != 9*time.Second {
+		t.Fatalf("repository timeouts were not applied: %+v", fetcher)
 	}
 }

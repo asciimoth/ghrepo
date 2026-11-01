@@ -28,6 +28,37 @@ func (c Runner) output() io.Writer {
 	}
 	return os.Stdout
 }
+
+func (c Runner) progressOutput() io.Writer {
+	if c.Progress != nil {
+		return c.Progress
+	}
+	return os.Stderr
+}
+
+func (c Runner) downloadProgress(stage string, index, total int, path string, run func() error) error {
+	_, _ = fmt.Fprintf(c.progressOutput(), "%s %d/%d: %s\n", stage, index, total, path)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	start := time.Now()
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				_, _ = fmt.Fprintf(c.progressOutput(), "%s %d/%d: %s (%s elapsed)\n", stage, index, total, path, time.Since(start).Round(time.Second))
+			case <-done:
+				return
+			}
+		}
+	}()
+	err := run()
+	close(done)
+	<-stopped
+	return err
+}
 func (c Runner) transaction() string { return filepath.Join(c.root(), ".ghrepo-transaction") }
 
 type transactionRecord struct {
@@ -333,9 +364,13 @@ func (c Runner) check(ctx context.Context) error {
 		return err
 	}
 	_, _, cacheRoot := c.paths()
-	for _, p := range m.Packages {
-		if _, err := cache.FetchVerified(ctx, cacheRoot, r, p, c.Fetcher); err != nil {
+	for i, p := range m.Packages {
+		err := c.downloadProgress("Checking source", i+1, len(m.Packages), p.Path, func() error {
+			_, err := cache.FetchVerified(ctx, cacheRoot, r, p, c.Fetcher)
 			return err
+		})
+		if err != nil {
+			return fmt.Errorf("package %s: %w", p.Path, err)
 		}
 	}
 	key := filepath.Join(c.root(), "KEY.gpg")
@@ -366,7 +401,7 @@ func (c Runner) check(ctx context.Context) error {
 		return err
 	}
 	// The site builder checks all links and the exact rendered size.
-	return site.Build(ctx, c.root(), filepath.Join(temp, "site"), c.Fetcher)
+	return site.BuildFromVerified(ctx, c.root(), filepath.Join(temp, "site"), cacheRoot, c.Fetcher)
 }
 
 func (c Runner) publish(ctx context.Context, args []string) error {
@@ -391,12 +426,15 @@ func (c Runner) publish(ctx context.Context, args []string) error {
 	if err := c.verifyIndexAllowlist(); err != nil {
 		return err
 	}
+	_, _ = fmt.Fprintln(c.progressOutput(), "Syncing packages")
 	if err := c.sync(ctx, nil); err != nil {
 		return err
 	}
+	_, _ = fmt.Fprintln(c.progressOutput(), "Building metadata")
 	if err := c.rebuild(ctx); err != nil {
 		return err
 	}
+	_, _ = fmt.Fprintln(c.progressOutput(), "Checking public sources and site")
 	if err := c.check(ctx); err != nil {
 		return err
 	}

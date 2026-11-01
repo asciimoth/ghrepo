@@ -33,9 +33,11 @@ type RPM struct {
 }
 
 type Download struct {
-	SourceHosts   []string `yaml:"source_hosts"`
-	RedirectHosts []string `yaml:"redirect_hosts"`
-	MaxBytes      int64    `yaml:"max_bytes"`
+	SourceHosts           []string `yaml:"source_hosts"`
+	RedirectHosts         []string `yaml:"redirect_hosts"`
+	MaxBytes              int64    `yaml:"max_bytes"`
+	ConnectTimeoutSeconds int      `yaml:"connect_timeout_seconds,omitempty"`
+	RequestTimeoutSeconds int      `yaml:"request_timeout_seconds,omitempty"`
 }
 
 type Site struct {

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,11 +14,46 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/asciimoth/ghrepo/cache"
 	"github.com/asciimoth/ghrepo/contract"
 	"github.com/asciimoth/ghrepo/inspect"
 	"github.com/asciimoth/ghrepo/rpm"
 	"gopkg.in/yaml.v3"
 )
+
+type countingFetcher struct {
+	base  cache.Fetcher
+	calls int
+}
+
+func (f *countingFetcher) Fetch(ctx context.Context, raw string, sources, redirects []string) (io.ReadCloser, error) {
+	f.calls++
+	return f.base.Fetch(ctx, raw, sources, redirects)
+}
+
+func TestCheckFetchesEachSourceOnce(t *testing.T) {
+	runner, _ := prepareFlow(t)
+	if err := runner.Run(context.Background(), []string{"rebuild"}); err != nil {
+		t.Fatal(err)
+	}
+	fetcher := &countingFetcher{base: runner.Fetcher}
+	runner.Fetcher = fetcher
+	var progress bytes.Buffer
+	runner.Progress = &progress
+	if err := runner.Run(context.Background(), []string{"check"}); err != nil {
+		t.Fatal(err)
+	}
+	_, manifest, err := runner.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetcher.calls != len(manifest.Packages) {
+		t.Fatalf("want %d source fetches, got %d", len(manifest.Packages), fetcher.calls)
+	}
+	if !strings.Contains(progress.String(), "Checking source 1/") {
+		t.Fatalf("missing download status: %s", progress.String())
+	}
+}
 
 func command(t *testing.T, dir string, args ...string) {
 	t.Helper()

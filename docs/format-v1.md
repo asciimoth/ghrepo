@@ -27,6 +27,8 @@ downloads:
   source_hosts: [github.com]
   redirect_hosts: [release-assets.githubusercontent.com, objects.githubusercontent.com]
   max_bytes: 2147483647
+  connect_timeout_seconds: 10
+  request_timeout_seconds: 600
 site:
   base_url: https://example.github.io/packages
   max_bytes: 1073741824
@@ -47,6 +49,13 @@ in `source_hosts`. Every redirect host must be in `source_hosts` or
 not allow userinfo, query parameters, fragments, or credentials. A redirect to a
 private address is also rejected. Redirect targets can have query parameters, as
 used by signed GitHub release asset URLs.
+
+`downloads.connect_timeout_seconds` limits each public IP connection attempt. It
+defaults to 10 seconds and can be set to 1–3600 seconds.
+`downloads.request_timeout_seconds` limits a complete HTTP request, including
+response body reads. It defaults to 600 seconds and can be set to 1–86400
+seconds. A value of 0 uses the default. These limits apply to the built-in
+package fetcher.
 
 APT uses one flat repository at `<base_url>/deb/`. The client source uses
 `deb [signed-by=...] <base_url>/deb/ ./` with no component token. The chosen

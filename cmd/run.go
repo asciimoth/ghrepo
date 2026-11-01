@@ -27,6 +27,7 @@ import (
 
 type Runner struct {
 	Out          io.Writer
+	Progress     io.Writer
 	Dir          string
 	Fetcher      cache.Fetcher
 	Now          func() time.Time
@@ -887,9 +888,19 @@ func (c Runner) sync(ctx context.Context, args []string) error {
 		}
 		return nil
 	}
-	for _, p := range m.Packages {
-		if _, err := cache.Ensure(ctx, root, r, p, c.Fetcher); err != nil {
+	for i, p := range m.Packages {
+		run := func() error {
+			_, err := cache.Ensure(ctx, root, r, p, c.Fetcher)
 			return err
+		}
+		var err error
+		if cache.VerifyFile(filepath.Join(root, "sha256", p.SHA256), p) == nil {
+			err = run()
+		} else {
+			err = c.downloadProgress("Downloading", i+1, len(m.Packages), p.Path, run)
+		}
+		if err != nil {
+			return fmt.Errorf("package %s: %w", p.Path, err)
 		}
 	}
 	return nil

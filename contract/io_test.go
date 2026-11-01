@@ -180,6 +180,8 @@ func TestConfigRejectCases(t *testing.T) {
 		func(r *Repository) { r.Repository.URL = "http://github.com/example" },
 		func(r *Repository) { r.Downloads.SourceHosts = []string{"127.0.0.1"} },
 		func(r *Repository) { r.Downloads.RedirectHosts = []string{"*.example.com"} },
+		func(r *Repository) { r.Downloads.ConnectTimeoutSeconds = -1 },
+		func(r *Repository) { r.Downloads.RequestTimeoutSeconds = 86401 },
 		func(r *Repository) { r.Site.RetentionDays = 29 },
 		func(r *Repository) { r.Site.MaxBytes = 1073741825 },
 		func(r *Repository) { r.RPM.PackageSignature = "trusted-packages" },

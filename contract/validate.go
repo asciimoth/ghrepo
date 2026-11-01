@@ -117,6 +117,9 @@ func (r Repository) Validate() error {
 	if r.Downloads.MaxBytes <= 0 || r.Downloads.MaxBytes > 2147483647 || r.Site.MaxBytes <= 0 || r.Site.MaxBytes > 1073741824 || r.Site.RetentionDays < 30 {
 		return errors.New("invalid size or retention limit")
 	}
+	if r.Downloads.ConnectTimeoutSeconds < 0 || r.Downloads.ConnectTimeoutSeconds > 3600 || r.Downloads.RequestTimeoutSeconds < 0 || r.Downloads.RequestTimeoutSeconds > 86400 {
+		return errors.New("invalid download timeout")
+	}
 	if r.Storage.Backend != "" && r.Storage.Backend != "none" && r.Storage.Backend != "github-releases" {
 		return errors.New("invalid storage backend")
 	}

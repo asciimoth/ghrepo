@@ -28,6 +28,16 @@ var rpmIndexName = regexp.MustCompile(`^[a-f0-9]{64}-(primary|filelists|other)\.
 // Build creates and verifies a site before it replaces output. checkout needs
 // only committed inputs; fetcher is nil for normal HTTPS downloads.
 func Build(ctx context.Context, checkout, output string, fetcher cache.Fetcher) error {
+	return build(ctx, checkout, output, fetcher, "")
+}
+
+// BuildFromVerified uses packages checked against public sources earlier in the
+// same operation. It verifies cached bytes again before staging them.
+func BuildFromVerified(ctx context.Context, checkout, output, verifiedRoot string, fetcher cache.Fetcher) error {
+	return build(ctx, checkout, output, fetcher, verifiedRoot)
+}
+
+func build(ctx context.Context, checkout, output string, fetcher cache.Fetcher, verifiedRoot string) error {
 	r, err := contract.ReadRepository(filepath.Join(checkout, "ghrepo.yaml"))
 	if err != nil {
 		return err
@@ -45,16 +55,25 @@ func Build(ctx context.Context, checkout, output string, fetcher cache.Fetcher) 
 		return err
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
-	downloads, err := os.MkdirTemp(parent, ".ghrepo-downloads-*")
-	if err != nil {
-		return err
+	downloads := verifiedRoot
+	if downloads == "" {
+		downloads, err = os.MkdirTemp(parent, ".ghrepo-downloads-*")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(downloads) }()
 	}
-	defer func() { _ = os.RemoveAll(downloads) }()
 	if err := copyInputs(checkout, stage, r); err != nil {
 		return err
 	}
 	for _, p := range m.Packages {
-		name, err := cache.FetchVerified(ctx, downloads, r, p, fetcher)
+		var name string
+		if verifiedRoot != "" {
+			name = filepath.Join(downloads, "sha256", p.SHA256)
+			err = cache.VerifyFile(name, p)
+		} else {
+			name, err = cache.FetchVerified(ctx, downloads, r, p, fetcher)
+		}
 		if err != nil {
 			return fmt.Errorf("package %s: %w", p.Path, err)
 		}
