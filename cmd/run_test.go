@@ -411,6 +411,64 @@ func TestInitExportsConfiguredPublicKeyWithoutReplacingIt(t *testing.T) {
 	}
 }
 
+func TestInitExplicitKeyUpdatesExistingLocalConfiguration(t *testing.T) {
+	tools := t.TempDir()
+	program := filepath.Join(tools, "gpg")
+	script := `#!/bin/sh
+case "$*" in
+  *--export*) printf 'public-%s' "$3" ;;
+esac
+`
+	if err := os.WriteFile(program, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+	clearTestEnv(t, "GHREPO_GPG_KEY_ID")
+	dir := t.TempDir()
+	var output bytes.Buffer
+	runner := Runner{Dir: dir, Out: &output}
+	ctx := context.Background()
+	if err := runner.Run(ctx, []string{"init", "--repo", "example/repo"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "GPG key: none") {
+		t.Fatalf("initial key output: %q", output.String())
+	}
+	output.Reset()
+	if err := runner.Run(ctx, []string{"init", "--dry-run", "--key-id", "DRYRUNKEY"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "GPG key: DRYRUNKEY") {
+		t.Fatalf("dry-run key output: %q", output.String())
+	}
+	local, err := contract.ReadLocal(filepath.Join(dir, ".ghrepo.local.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local.GPG.KeyID != "" {
+		t.Fatalf("dry run saved key: %q", local.GPG.KeyID)
+	}
+	for _, keyID := range []string{"FIRSTKEY", "SECONDKEY"} {
+		output.Reset()
+		if err := runner.Run(ctx, []string{"init", "--key-id", keyID}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(output.String(), "GPG key: "+keyID) {
+			t.Fatalf("explicit key output: %q", output.String())
+		}
+		local, err := contract.ReadLocal(filepath.Join(dir, ".ghrepo.local.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if local.GPG.KeyID != keyID {
+			t.Fatalf("saved key: %q, want %q", local.GPG.KeyID, keyID)
+		}
+		if got := string(mustRead(t, filepath.Join(dir, "KEY.gpg"))); got != "public-"+keyID {
+			t.Fatalf("exported key: %q, want public-%s", got, keyID)
+		}
+	}
+}
+
 func TestInitSelectsFirstLocalSigningKey(t *testing.T) {
 	tools := t.TempDir()
 	program := filepath.Join(tools, "gpg")

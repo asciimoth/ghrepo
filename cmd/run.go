@@ -424,7 +424,11 @@ func (c Runner) init(ctx context.Context, args []string) error {
 	}
 	keyPath := filepath.Join(dir, "KEY.gpg")
 	if configured.GPG.KeyID != "" {
-		if _, err := os.Lstat(keyPath); errors.Is(err, os.ErrNotExist) {
+		_, err := os.Lstat(keyPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if errors.Is(err, os.ErrNotExist) || *keyID != "" {
 			args := []string{"--batch"}
 			if configured.GPG.Keyring != "" {
 				args = append(args, "--no-default-keyring", "--keyring", configured.GPG.Keyring)
@@ -444,8 +448,6 @@ func (c Runner) init(ctx context.Context, args []string) error {
 			if err := contract.WriteAtomic(keyPath, data, 0644); err != nil {
 				return err
 			}
-		} else if err != nil {
-			return err
 		}
 	}
 	if selectedKey != "" {
@@ -504,6 +506,7 @@ func (c Runner) init(ctx context.Context, args []string) error {
 func initSigningKey(ctx context.Context, dir, keyID string) (contract.Local, string, error) {
 	name := filepath.Join(dir, ".ghrepo.local.yaml")
 	local := contract.Local{Schema: 1}
+	selectedKey := ""
 	if _, err := os.Lstat(name); err == nil {
 		local, err = contract.LoadEffectiveLocal(name, processEnv())
 		if err != nil {
@@ -512,14 +515,17 @@ func initSigningKey(ctx context.Context, dir, keyID string) (contract.Local, str
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return contract.Local{}, "", err
 	} else {
-		local.GPG.KeyID = keyID
 		local = contract.EffectiveLocal(local, nil, processEnv())
+	}
+	if keyID != "" {
+		local.GPG.KeyID = keyID
+		selectedKey = keyID
 	}
 	if err := local.Validate(); err != nil {
 		return contract.Local{}, "", err
 	}
 	if local.GPG.KeyID != "" {
-		return local, "", nil
+		return local, selectedKey, nil
 	}
 	if _, err := os.Lstat(filepath.Join(dir, "KEY.gpg")); err == nil {
 		return local, "", nil
