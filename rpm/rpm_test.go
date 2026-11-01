@@ -342,3 +342,77 @@ func TestPayloadFilesInMetadata(t *testing.T) {
 	}
 	t.Fatal("filelists metadata missing")
 }
+
+func TestRPMFilePathCompatibility(t *testing.T) {
+	for _, name := range []string{"/usr/share/notes..txt", "/usr/share/...", "/usr/share/.hidden", "/usr/share/regular"} {
+		if !safeRPMFilePath(name) {
+			t.Errorf("rejected valid path %q", name)
+		}
+	}
+	for _, name := range []string{"relative", "/../escape", "/usr/../escape", "/usr/share/..", "/usr/\x00file"} {
+		if safeRPMFilePath(name) {
+			t.Errorf("accepted unsafe path %q", name)
+		}
+	}
+}
+
+func TestTranslatedRPMBuildVerify(t *testing.T) {
+	root, pub, cacheRoot, r, m, local := fixture(t)
+	raw := mustRead(t, "../contract/testdata/packages/compat.rpm")
+	meta, err := inspect.Bytes(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Fields["Summary"] != "Compatibility summary" || meta.Fields["Description"] != "Compatibility description." {
+		t.Fatalf("lost default text: %+v", meta.Fields)
+	}
+	r.RPM.Architectures = []string{"noarch"}
+	sum := sha256.Sum256(raw)
+	p := &m.Packages[0]
+	p.Identity, p.Size, p.SHA256 = meta.Identity, int64(len(raw)), hex.EncodeToString(sum[:])
+	p.Path, err = contract.ServedPath(*p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheRoot, "sha256", p.SHA256), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	site := filepath.Join(root, "site")
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(site, p.Path)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(site, p.Path), raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "rpm")
+	if err := Build(out, cacheRoot, r, m, local); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(out, pub, site, r, m); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"primary", "filelists"} {
+		files, err := filepath.Glob(filepath.Join(out, "repodata", "*-"+kind+".xml.gz"))
+		if err != nil || len(files) != 1 {
+			t.Fatalf("%s files = %v, %v", kind, files, err)
+		}
+		gz, err := gzip.NewReader(bytes.NewReader(mustRead(t, files[0])))
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(gz)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := gz.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if kind == "primary" {
+			if !bytes.Contains(data, []byte("Compatibility summary")) || !bytes.Contains(data, []byte("Compatibility description.")) {
+				t.Fatalf("missing translated text in index: %s", data)
+			}
+		} else if !bytes.Contains(data, []byte("/usr/share/ghrepo-compat/notes..txt")) {
+			t.Fatalf("missing valid file path in index: %s", data)
+		}
+	}
+}

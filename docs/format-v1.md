@@ -236,20 +236,37 @@ packaging backend. It checks refresh and package download. Set
 `GHREPO_APT_INSTALL=1` only in a disposable root container to also check
 installation.
 
+The DEB control archive must contain one regular `control` or `./control` file,
+at most 1 MiB in size. Safe regular metadata files, such as `md5sums`, and
+directory entries are allowed. Links, special files, unsafe paths, and duplicate
+control files are rejected. Control fields follow the
+[Debian control syntax](https://manpages.debian.org/unstable/dpkg-dev/deb822.5.en.html),
+including space or tab continuations and printable ASCII extension field names.
+Blank lines can precede or follow the single stanza. Empty field values,
+duplicate field names, and a second stanza are rejected. A multiline extension
+field can start its value on a continuation line. The APT index preserves these
+continuations.
+
 The RPM reader candidate is `github.com/sassoftware/go-rpmutils` v0.4.0. Its
 `ReadHeader`, `GetNEVRA`, and `PayloadReaderExtended` read the checked-in gzip,
 xz, and zstd RPM fixtures in the offline test. Its `Verify` API checks package
-signatures. The local copy signature passes independent `rpm --checksig` with an
-imported test key. The DEB fixture uses Go's `archive/tar` and `compress/gzip`,
-so no third-party DEB reader is needed for the first compression method. The
-`rpm` package generates checksum-named gzip XML `primary`, `filelists`, and
-`other` files. `repomd.xml` records each compressed and open SHA-256, size,
-location, and timestamp. `repomd.xml.asc` is a detached RSA or Ed25519 SHA-256
-GPG signature. `rpm.Verify` checks this signature, all metadata checksums and
-package entries against the active manifest, and package bytes when given a site
-root. Retained packages do not appear in new metadata. A failed build removes
-its new output directory. The caller replaces existing metadata only after
-verification.
+signatures. Before the library reads an RPM, ghrepo checks header lengths, tag
+types, counts, offsets, and string termination. It also checks the lengths of
+parallel file arrays and their directory indexes. Unknown tags with valid types
+are allowed. Inspection uses the default text from translated summary and
+description fields. Malformed identity, dependency, and signature tags are
+rejected. RPM file paths can contain two dots within a name, but a `..` path
+component is rejected. The local copy signature passes independent
+`rpm --checksig` with an imported test key. The DEB fixture uses Go's
+`archive/tar` and `compress/gzip`, so no third-party DEB reader is needed for
+the first compression method. The `rpm` package generates checksum-named gzip
+XML `primary`, `filelists`, and `other` files. `repomd.xml` records each
+compressed and open SHA-256, size, location, and timestamp. `repomd.xml.asc` is
+a detached RSA or Ed25519 SHA-256 GPG signature. `rpm.Verify` checks this
+signature, all metadata checksums and package entries against the active
+manifest, and package bytes when given a site root. Retained packages do not
+appear in new metadata. A failed build removes its new output directory. The
+caller replaces existing metadata only after verification.
 
 `metadata-only` leaves upstream RPM bytes unchanged and requires
 `repo_gpgcheck=1`, `gpgcheck=0` in generated client settings. For
@@ -296,10 +313,17 @@ repository documentation and is not part of the Pages artifact.
 
 ## Fixture source and license
 
-`contract/testdata/generate/main.go` deterministically creates the four DEB
-archives with `go run .` from that directory. The generator is part of this
-GPL-3.0 licensed project. The RPM fixtures are copied unchanged from
-`go-rpmutils` v0.4.0 `testdata/empty-0.1-1.x86_64.rpm` and its gzip and xz
+`contract/testdata/generate/main.go` deterministically creates the DEB fixtures
+with `go run .` from that directory. `hello_compat.deb` contains a root
+directory, metadata files before and after `control`, an executable maintainer
+script, tab continuations, extension fields, and a final stanza separator. Tests
+use it for inspection, CLI add and sync, and signed APT index generation and
+verification. The generator is part of this GPL-3.0 licensed project.
+`contract/testdata/compat.spec` and `generate-compat-rpm.sh` create `compat.rpm`
+with rpmbuild 4.20.1. This GPL-3.0 fixture contains translated text, epoch 2,
+and `/usr/share/ghrepo-compat/notes..txt`. It is checked through inspection and
+signed RPM repository generation. The other RPM fixtures are copied unchanged
+from `go-rpmutils` v0.4.0 `testdata/empty-0.1-1.x86_64.rpm` and its gzip and xz
 payload-test RPMs. They are distributed under Apache-2.0; their source specs are
 `testdata/empty.spec` and `testdata/payload-test.spec` in that project. The
 checked-in RPMs require no RPM tools for tests.

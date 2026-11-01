@@ -259,7 +259,7 @@ func BuildWithKeyRoot(out, cacheRoot, keyRoot string, r contract.Repository, m c
 		}
 		fileEntries := make([]fileEntry, 0, len(files))
 		for _, f := range files {
-			if !strings.HasPrefix(f.Name(), "/") || strings.Contains(f.Name(), "..") {
+			if !safeRPMFilePath(f.Name()) {
 				return errors.New("invalid RPM file path")
 			}
 			item := fileEntry{Path: f.Name()}
@@ -327,7 +327,7 @@ func headerDependencies(hdr *rpmutils.RpmHeader, namesTag, versionsTag, flagsTag
 	names, e := hdr.GetStrings(namesTag)
 	if e != nil {
 		var absent rpmutils.NoSuchTagError
-		if errors.As(e, &absent) {
+		if errors.As(e, &absent) && !hdr.HasTag(versionsTag) && !hdr.HasTag(flagsTag) {
 			return dependencyList{}, nil
 		}
 		return dependencyList{}, e
@@ -411,12 +411,14 @@ func VerifyPackageSignature(name string, keyPaths []string, policy string) error
 	if len(keys) == 0 {
 		return errors.New("no trusted RPM package keys")
 	}
-	f, err := os.Open(name)
+	raw, err := os.ReadFile(name)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = f.Close() }()
-	_, sigs, err := rpmutils.Verify(f, keys)
+	if err := contract.CheckRPMFormat(raw); err != nil {
+		return err
+	}
+	_, sigs, err := rpmutils.Verify(bytes.NewReader(raw), keys)
 	if err != nil {
 		return fmt.Errorf("RPM package signature verification failed: %w", err)
 	}
@@ -592,4 +594,16 @@ func wantPathID(want map[string]contract.Package, id string) (contract.Package, 
 		}
 	}
 	return contract.Package{}, false
+}
+
+func safeRPMFilePath(name string) bool {
+	if !strings.HasPrefix(name, "/") || strings.ContainsRune(name, 0) {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == ".." {
+			return false
+		}
+	}
+	return true
 }

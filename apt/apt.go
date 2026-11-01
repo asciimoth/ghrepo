@@ -137,7 +137,7 @@ func controlField(w io.Writer, key, value string) error {
 		return fmt.Errorf("invalid DEB field %s", key)
 	}
 	for n, line := range strings.Split(value, "\n") {
-		if n > 0 && !strings.HasPrefix(line, " ") {
+		if n > 0 && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
 			return fmt.Errorf("invalid DEB field continuation %s", key)
 		}
 	}
@@ -322,7 +322,7 @@ func readPackages(data []byte, expected []contract.Package) error {
 		fields := map[string]string{}
 		last := ""
 		for _, line := range strings.Split(stanza, "\n") {
-			if strings.HasPrefix(line, " ") {
+			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
 				if last == "" {
 					return errors.New("invalid APT Packages continuation")
 				}

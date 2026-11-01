@@ -286,4 +286,27 @@ installation. The RPM test also checks both package signature policies. Docker
 downloads the images and their test tools on the first run. The normal
 `just test` command does not require Docker.
 
+The same job checks package inspection against `dpkg-deb` and `rpm`. It builds
+gzip DEBs for `amd64`, `arm64`, and `all`, checks control archive layouts and
+field syntax, and compares RPM identity and dependency fields for gzip, xz, and
+zstd fixtures. RPM builds also cover translated summaries and descriptions,
+nonzero epochs, and filenames containing two dots. These tests use temporary
+files and do not install packages. To run only these checks with `dpkg-deb`,
+`rpm`, and `rpmbuild` on `PATH`:
+
+```sh
+GHREPO_DEB_COMPAT=1 GHREPO_RPM_COMPAT=1 GHREPO_RPM_BUILD_COMPAT=1 \
+  go test ./inspect -run 'Test(DEBDpkg|RPMTool|RPMBuild)' -v
+```
+
+Without these environment variables, `go test ./inspect` skips a tool check when
+the tool is unavailable. The archive and field regression tests always run
+offline. Run
+`go test ./inspect -run '^$' -fuzz '^FuzzDEBInspection$' -fuzztime 10s` to
+exercise malformed DEB inputs. Use `-fuzz '^FuzzRPMInspection$'` to exercise
+malformed RPM headers. `just fuzz` also runs focused targets for DEB gzip, tar,
+and control fields and for RPM headers and embedded OpenPGP signature packets.
+Each target keeps the outer archive valid so changes reach the parser under
+test.
+
 [pages-source]: https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site#publishing-with-a-custom-github-actions-workflow

@@ -125,14 +125,24 @@ func deb(data []byte) (Metadata, error) {
 					return Metadata{}, fmt.Errorf("invalid DEB control tar: %w", err)
 				}
 				clean := path.Clean(hdr.Name)
-				if (hdr.Name != "control" && hdr.Name != "./control") || clean != "control" || hdr.Typeflag != tar.TypeReg || found || hdr.Size > 1024*1024 || hdr.Size < 1 {
+				if hdr.Name == "" || strings.HasPrefix(hdr.Name, "/") || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains("/"+hdr.Name+"/", "/../") || (clean == "." && hdr.Typeflag != tar.TypeDir) {
 					return Metadata{}, errors.New("unsafe or unsupported DEB control path")
 				}
-				control, err = io.ReadAll(io.LimitReader(tr, 1024*1024+1))
-				if err != nil {
-					return Metadata{}, err
+				if (hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeDir) || (hdr.Typeflag == tar.TypeDir && hdr.Size != 0) {
+					return Metadata{}, errors.New("unsafe or unsupported DEB control path")
 				}
-				found = true
+				if clean == "control" {
+					if (hdr.Name != "control" && hdr.Name != "./control") || hdr.Typeflag != tar.TypeReg || found || hdr.Size > 1024*1024 || hdr.Size < 1 {
+						return Metadata{}, errors.New("unsafe or unsupported DEB control path")
+					}
+					control, err = io.ReadAll(io.LimitReader(tr, 1024*1024+1))
+					if err != nil {
+						return Metadata{}, fmt.Errorf("invalid DEB control member: %w", err)
+					}
+					found = true
+				} else if _, err := io.Copy(io.Discard, tr); err != nil {
+					return Metadata{}, fmt.Errorf("invalid DEB control member: %w", err)
+				}
 			}
 			if !found {
 				return Metadata{}, errors.New("missing DEB control file")
@@ -158,9 +168,22 @@ func deb(data []byte) (Metadata, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(control))
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	previous := ""
+	finished := false
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, " ") {
+		if strings.ContainsAny(line, "\r\x00") {
+			return Metadata{}, errors.New("invalid DEB control field value")
+		}
+		if strings.Trim(line, " \t") == "" {
+			if len(fields) != 0 {
+				finished = true
+			}
+			continue
+		}
+		if finished {
+			return Metadata{}, errors.New("multiple DEB control stanzas")
+		}
+		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
 			if previous == "" {
 				return Metadata{}, errors.New("invalid DEB control continuation")
 			}
@@ -169,27 +192,31 @@ func deb(data []byte) (Metadata, error) {
 		}
 		key, value, ok := strings.Cut(line, ":")
 		lower := strings.ToLower(key)
-		if !ok || key == "" || strings.TrimSpace(value) == "" || seen[lower] {
+		if !ok || key == "" || seen[lower] {
 			return Metadata{}, errors.New("invalid or duplicate DEB control field")
 		}
+		if key[0] == '#' || key[0] == '-' {
+			return Metadata{}, errors.New("invalid DEB control field")
+		}
 		for _, c := range key {
-			if c < 'A' || c > 'Z' {
-				if c < 'a' || c > 'z' {
-					if c != '-' && (c < '0' || c > '9') {
-						return Metadata{}, errors.New("invalid DEB control field")
-					}
-				}
+			if c < '!' || c > '~' {
+				return Metadata{}, errors.New("invalid DEB control field")
 			}
 		}
 		seen[lower] = true
 		if standard, ok := canonical[lower]; ok {
 			key = standard
 		}
-		fields[key] = strings.TrimSpace(value)
+		fields[key] = strings.Trim(value, " \t")
 		previous = key
 	}
 	if scanner.Err() != nil {
 		return Metadata{}, scanner.Err()
+	}
+	for key, value := range fields {
+		if strings.Trim(value, " \t\n") == "" {
+			return Metadata{}, fmt.Errorf("empty DEB control field %s", key)
+		}
 	}
 	for _, key := range []string{"Package", "Version", "Architecture", "Maintainer", "Description"} {
 		if fields[key] == "" {
@@ -217,6 +244,16 @@ func rpm(data []byte) (Metadata, error) {
 	if err != nil {
 		return Metadata{}, fmt.Errorf("invalid RPM header: %w", err)
 	}
+	for _, tag := range []int{rpmutils.NAME, rpmutils.VERSION, rpmutils.RELEASE, rpmutils.ARCH} {
+		if value, err := hdr.GetString(tag); err != nil || value == "" {
+			return Metadata{}, errors.New("invalid RPM identity field")
+		}
+	}
+	if hdr.HasTag(rpmutils.EPOCH) {
+		if values, err := hdr.GetUint64s(rpmutils.EPOCH); err != nil || len(values) != 1 {
+			return Metadata{}, errors.New("invalid RPM epoch")
+		}
+	}
 	n, err := hdr.GetNEVRA()
 	if err != nil {
 		return Metadata{}, fmt.Errorf("invalid RPM identity: %w", err)
@@ -227,15 +264,26 @@ func rpm(data []byte) (Metadata, error) {
 	}
 	fields := map[string]string{}
 	for key, tag := range map[string]int{"Summary": rpmutils.SUMMARY, "Description": rpmutils.DESCRIPTION, "License": rpmutils.LICENSE, "URL": rpmutils.URL} {
-		if v, e := hdr.GetString(tag); e == nil {
-			fields[key] = v
+		if !hdr.HasTag(tag) {
+			continue
 		}
+		values, err := hdr.GetStrings(tag)
+		if err != nil || len(values) == 0 || ((key == "License" || key == "URL") && len(values) != 1) {
+			return Metadata{}, fmt.Errorf("invalid RPM %s field", key)
+		}
+		// RPM stores the default (C locale) text first, followed by translations.
+		fields[key] = values[0]
 	}
-	requires, _ := hdr.GetStrings(rpmutils.REQUIRENAME)
-	versions, _ := hdr.GetStrings(rpmutils.REQUIREVERSION)
-	flags, _ := hdr.GetUint32s(rpmutils.REQUIREFLAGS)
-	if len(requires) > 0 && (len(versions) != len(requires) || len(flags) != len(requires)) {
-		return Metadata{}, errors.New("invalid RPM dependency fields")
+	var requires, versions []string
+	var flags []uint32
+	if hdr.HasTag(rpmutils.REQUIRENAME) || hdr.HasTag(rpmutils.REQUIREVERSION) || hdr.HasTag(rpmutils.REQUIREFLAGS) {
+		var namesErr, versionsErr, flagsErr error
+		requires, namesErr = hdr.GetStrings(rpmutils.REQUIRENAME)
+		versions, versionsErr = hdr.GetStrings(rpmutils.REQUIREVERSION)
+		flags, flagsErr = hdr.GetUint32s(rpmutils.REQUIREFLAGS)
+		if namesErr != nil || versionsErr != nil || flagsErr != nil || len(versions) != len(requires) || len(flags) != len(requires) {
+			return Metadata{}, errors.New("invalid RPM dependency fields")
+		}
 	}
 	dependencies := make([]Requirement, len(requires))
 	for i, name := range requires {
@@ -247,9 +295,14 @@ func rpm(data []byte) (Metadata, error) {
 		tag  int
 		algo packet.PublicKeyAlgorithm
 	}{{"RSA", rpmutils.SIG_RSA, packet.PubKeyAlgoRSA}, {"DSA", rpmutils.SIG_DSA, packet.PubKeyAlgoEdDSA}, {"PGP", rpmutils.SIG_PGP, packet.PubKeyAlgoRSA}, {"GPG", rpmutils.SIG_GPG, packet.PubKeyAlgoEdDSA}} {
-		if raw, e := hdr.GetBytes(item.tag); e == nil && len(raw) > 0 {
-			sig, err := packet.Read(bytes.NewReader(raw))
-			if err != nil {
+		if hdr.HasTag(item.tag) {
+			raw, err := hdr.GetBytes(item.tag)
+			if err != nil || len(raw) == 0 {
+				return Metadata{}, errors.New("invalid RPM package signature tag")
+			}
+			reader := bytes.NewReader(raw)
+			sig, err := packet.Read(reader)
+			if err != nil || reader.Len() != 0 {
 				return Metadata{}, errors.New("invalid RPM package signature")
 			}
 			v4, ok := sig.(*packet.Signature)

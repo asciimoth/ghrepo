@@ -72,6 +72,13 @@ func CheckRPMFormat(data []byte) error {
 	if len(data) < 96 || !bytes.Equal(data[:4], []byte{0xed, 0xab, 0xee, 0xdb}) || data[4] != 3 {
 		return ErrUnsupportedRPMVersion
 	}
+	n, err := checkRPMHeader(data[96:], true)
+	if err != nil {
+		return fmt.Errorf("malformed RPM signature header: %w", err)
+	}
+	if _, err := checkRPMHeader(data[96+n:], false); err != nil {
+		return fmt.Errorf("malformed RPM header: %w", err)
+	}
 	hdr, err := rpmutils.ReadHeader(bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("malformed RPM header: %w", err)
@@ -83,5 +90,5 @@ func CheckRPMFormat(data []byte) error {
 	if compression != "gzip" && compression != "xz" && compression != "zstd" {
 		return fmt.Errorf("%w: %s", ErrUnsupportedRPMCompression, compression)
 	}
-	return nil
+	return checkRPMFiles(hdr)
 }

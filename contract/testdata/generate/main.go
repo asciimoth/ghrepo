@@ -22,6 +22,23 @@ func main() {
 	write(base, "hello_changed.deb", deb(control+"X-Fixture: changed bytes\n", "control"))
 	write(base, "hello_unsafe.deb", deb(control, "../control"))
 	write(base, "hello_malformed.deb", []byte("!<arch>\ninvalid archive"))
+	write(base, "hello_compat.deb", compatibilityDEB())
+}
+
+func compatibilityDEB() []byte {
+	control := "Package: hello-compat\nVersion: 1.2.0-1\nArchitecture: amd64\nMaintainer: Fixture <fixture@example.invalid>\nDescription: compatibility fixture\n\tlong description\n .\n final paragraph\nDepends: libc6,\n\tbase-files\nX.Vendor_1+: value\nX-Notes:\n first line\n\tsecond line\n\n"
+	var out bytes.Buffer
+	out.WriteString("!<arch>\n")
+	ar(&out, "debian-binary", []byte("2.0\n"))
+	ar(&out, "control.tar.gz", tarEntries([]tarEntry{
+		{"./", nil, 0755, tar.TypeDir},
+		{"./md5sums", []byte("b1946ac92492d2347c6235b4d2611184  usr/share/doc/hello/README\n"), 0644, tar.TypeReg},
+		{"./control", []byte(control), 0644, tar.TypeReg},
+		{"./conffiles", nil, 0644, tar.TypeReg},
+		{"./postinst", []byte("#!/bin/sh\nexit 0\n"), 0755, tar.TypeReg},
+	}))
+	ar(&out, "data.tar.gz", tarball("./usr/share/doc/hello/README", []byte("hello\n")))
+	return out.Bytes()
 }
 
 func write(base, name string, b []byte) {
@@ -57,6 +74,17 @@ func ar(out *bytes.Buffer, name string, body []byte) {
 }
 
 func tarball(name string, body []byte) []byte {
+	return tarEntries([]tarEntry{{name, body, 0644, tar.TypeReg}})
+}
+
+type tarEntry struct {
+	name string
+	body []byte
+	mode int64
+	kind byte
+}
+
+func tarEntries(entries []tarEntry) []byte {
 	var buf bytes.Buffer
 	gz, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
 	if err != nil {
@@ -65,11 +93,13 @@ func tarball(name string, body []byte) []byte {
 	gz.ModTime = time.Unix(0, 0)
 	gz.OS = 255
 	tw := tar.NewWriter(gz)
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body)), ModTime: time.Unix(0, 0), Format: tar.FormatUSTAR}); err != nil {
-		panic(err)
-	}
-	if _, err := tw.Write(body); err != nil {
-		panic(err)
+	for _, entry := range entries {
+		if err := tw.WriteHeader(&tar.Header{Name: entry.name, Mode: entry.mode, Size: int64(len(entry.body)), Typeflag: entry.kind, ModTime: time.Unix(0, 0), Format: tar.FormatUSTAR}); err != nil {
+			panic(err)
+		}
+		if _, err := tw.Write(entry.body); err != nil {
+			panic(err)
+		}
 	}
 	if err := tw.Close(); err != nil {
 		panic(err)

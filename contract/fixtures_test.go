@@ -41,7 +41,7 @@ func TestOfflineFixtures(t *testing.T) {
 	if err := json.Unmarshal(catalog, &cases); err != nil {
 		t.Fatal(err)
 	}
-	if len(cases) != 10 {
+	if len(cases) != 12 {
 		t.Fatalf("fixture count = %d", len(cases))
 	}
 	seen := map[string]string{}
@@ -213,7 +213,7 @@ func readDebControl(b []byte) (string, error) {
 				if path.IsAbs(h.Name) || strings.HasPrefix(h.Name, "../") || strings.Contains(h.Name, "/../") {
 					return "", errors.New("unsafe control path")
 				}
-				if h.Name == "control" {
+				if h.Name == "control" || h.Name == "./control" {
 					fields, err := io.ReadAll(tr)
 					if err != nil {
 						return "", err

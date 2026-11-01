@@ -10,9 +10,11 @@ func TestFixtures(t *testing.T) {
 	root := "../contract/testdata/packages"
 	for _, tc := range []struct{ name, format, identity string }{
 		{"hello_1.2.0-1_amd64.deb", "deb", "hello"},
+		{"hello_compat.deb", "deb", "hello-compat"},
 		{"empty-0.1-1.x86_64.rpm", "rpm", "empty"},
 		{"payload-gzip.rpm", "rpm", "payload-test"},
 		{"payload-xz.rpm", "rpm", "payload-test"},
+		{"compat.rpm", "rpm", "ghrepo-compat"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, size, hash, err := File(filepath.Join(root, tc.name), 2147483647)

@@ -100,7 +100,7 @@
       devShells.default = pkgs.mkShell {
         inherit (checks.pre-commit-check) shellHook;
         buildInputs = with pkgs; [
-          go
+          go_1_27
           golangci-lint
           gopls
 

@@ -620,3 +620,36 @@ func clearTestEnv(t *testing.T, name string) {
 		}
 	})
 }
+
+func TestAddCompatibilityDEB(t *testing.T) {
+	data := mustRead(t, "../contract/testdata/packages/hello_compat.deb")
+	url := "https://example.com/compat.deb"
+	runner := Runner{Dir: t.TempDir(), Fetcher: fixtureFetcher{map[string][]byte{url: data}}}
+	ctx := context.Background()
+	if err := runner.Run(ctx, []string{"init", "--repo", "example/repo", "--source-hosts", "example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"add", url}); err != nil {
+		t.Fatal(err)
+	}
+	_, m, err := runner.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Packages) != 1 {
+		t.Fatalf("packages = %+v", m.Packages)
+	}
+	p := m.Packages[0]
+	if p.Identity != (contract.Identity{Name: "hello-compat", Version: "1.2.0-1", Architecture: "amd64"}) || p.Size != int64(len(data)) || p.SHA256 != "a21977c86ce7048fd0d82a924860d1c497d34203dd1f4950e82cf2b5b1ea3828" {
+		t.Fatalf("incorrect manifest entry: %+v", p)
+	}
+	before := mustRead(t, filepath.Join(runner.Dir, "packages.yaml"))
+	for _, args := range [][]string{{"add", url}, {"sync"}} {
+		if err := runner.Run(ctx, args); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !bytes.Equal(before, mustRead(t, filepath.Join(runner.Dir, "packages.yaml"))) {
+		t.Fatal("repeat add or sync changed manifest")
+	}
+}

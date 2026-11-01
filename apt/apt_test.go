@@ -448,3 +448,51 @@ func testAPTClientCompatibility(t *testing.T, algorithm string) {
 		t.Fatalf("package HTTP status: %d", resp.StatusCode)
 	}
 }
+
+func TestCompatibilityControlBuildVerify(t *testing.T) {
+	root, public, r, m, local, cacheRoot := fixture(t)
+	raw, err := os.ReadFile("../contract/testdata/packages/hello_compat.deb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := inspect.Bytes(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	p := &m.Packages[0]
+	p.Identity, p.Size, p.SHA256 = meta.Identity, int64(len(raw)), hex.EncodeToString(sum[:])
+	p.Path, err = contract.ServedPath(*p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheRoot, "sha256", p.SHA256), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "compat")
+	if err := Build(out, cacheRoot, r, m, local); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(out, public, r, m); err != nil {
+		t.Fatal(err)
+	}
+	index, err := os.ReadFile(filepath.Join(out, "Packages"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{
+		"Description: compatibility fixture\n\tlong description\n .\n final paragraph\n",
+		"Depends: libc6,\n\tbase-files\n",
+		"X.Vendor_1+: value\n",
+		"X-Notes: \n first line\n\tsecond line\n",
+	} {
+		if !bytes.Contains(index, []byte(field)) {
+			t.Fatalf("index lost field %q:\n%s", field, index)
+		}
+	}
+	// Continue to reject an unindented line that could create an index field.
+	var buf bytes.Buffer
+	if err := controlField(&buf, "Description", "summary\nFilename: injected.deb"); err == nil {
+		t.Fatal("accepted an unindented field continuation")
+	}
+}
