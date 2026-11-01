@@ -16,16 +16,15 @@ installing it with `nix run github:asciimoth/ghrepo -- --help`.
 ## Make a release
 
 The release command builds Linux `amd64` and `arm64` binaries. GoReleaser makes
-`tar.gz`, DEB, and RPM files for each architecture. It signs the DEB and RPM
-packages with GPG, adds a detached GPG signature for each release artifact and
-the checksum file, and publishes them in a GitHub Release.
+`tar.gz`, DEB, and RPM files for each architecture. It adds a detached GPG
+signature for each archive and package, signs the checksum file, and publishes
+them in a GitHub Release. The DEB and RPM packages do not contain embedded
+signatures; verify their `.sig` files before installation.
 
 Install the release tools with `nix develop`. Configure GitHub authentication
 with `GITHUB_TOKEN` or `GH_TOKEN` (the token needs `contents: write`), or sign
 in with `gh auth login`. Set `GPG_KEY_ID` to the fingerprint of a local GPG
-secret key. If the key has a passphrase, also set `NFPM_PASSPHRASE` so the DEB
-and RPM packagers can sign their packages. Do not commit these values or the
-secret key.
+secret key. Do not commit the token or secret key.
 
 Commit all changes, then run the command from the branch you want to release:
 

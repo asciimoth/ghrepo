@@ -35,12 +35,6 @@ nfpms:
     formats:
       - deb
       - rpm
-    rpm:
-      signature:
-        key_file: "{{ .Env.GPG_KEY_FILE }}"
-    deb:
-      signature:
-        key_file: "{{ .Env.GPG_KEY_FILE }}"
 
 checksum:
   name_template: checksums.txt

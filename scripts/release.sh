@@ -48,17 +48,6 @@ if [[ -n $(git status --porcelain) ]]; then
   exit 1
 fi
 
-key_dir=$(mktemp -d)
-trap 'rm -rf "$key_dir"' EXIT
-chmod 700 "$key_dir"
-export GPG_KEY_FILE="$key_dir/release.key"
-gpg --batch --yes --armor --output "$GPG_KEY_FILE" --export-secret-keys "$GPG_KEY_ID"
-if [[ ! -s $GPG_KEY_FILE ]]; then
-  printf 'Could not export the signing key.\n' >&2
-  exit 1
-fi
-chmod 600 "$GPG_KEY_FILE"
-
 # Build and sign every asset before the tag is pushed.
 goreleaser release --snapshot --clean --skip=publish
 
