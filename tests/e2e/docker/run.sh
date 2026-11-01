@@ -15,16 +15,20 @@ GOOS=linux CGO_ENABLED=0 go test -c -o "$work_dir/rpm.test" ./rpm
 docker build -q -f tests/e2e/docker/Dockerfile.debian -t ghrepo-e2e-debian tests/e2e/docker
 docker build -q -f tests/e2e/docker/Dockerfile.rpm -t ghrepo-e2e-rpm tests/e2e/docker
 
-docker run --rm \
-    --mount "type=bind,src=$repo_root,dst=/src,readonly" \
-    --mount "type=bind,src=$work_dir,dst=/tests,readonly" \
-    --workdir /src/apt \
-    --env GHREPO_APT_INSTALL=1 \
-    ghrepo-e2e-debian /tests/apt.test -test.v -test.run '^TestAPTClientCompatibility$'
+for algorithm in rsa2048 ed25519; do
+    docker run --rm \
+        --mount "type=bind,src=$repo_root,dst=/src,readonly" \
+        --mount "type=bind,src=$work_dir,dst=/tests,readonly" \
+        --workdir /src/apt \
+        --env GHREPO_APT_INSTALL=1 \
+        --env "GHREPO_TEST_KEY_ALGORITHM=$algorithm" \
+        ghrepo-e2e-debian /tests/apt.test -test.v -test.run '^TestAPTClientCompatibility$'
 
-docker run --rm \
-    --mount "type=bind,src=$repo_root,dst=/src,readonly" \
-    --mount "type=bind,src=$work_dir,dst=/tests,readonly" \
-    --workdir /src/rpm \
-    --env GHREPO_RPM_INSTALL=1 \
-    ghrepo-e2e-rpm /tests/rpm.test -test.v -test.run '^TestCompatibility$'
+    docker run --rm \
+        --mount "type=bind,src=$repo_root,dst=/src,readonly" \
+        --mount "type=bind,src=$work_dir,dst=/tests,readonly" \
+        --workdir /src/rpm \
+        --env GHREPO_RPM_INSTALL=1 \
+        --env "GHREPO_TEST_KEY_ALGORITHM=$algorithm" \
+        ghrepo-e2e-rpm /tests/rpm.test -test.v -test.run '^TestCompatibility$'
+done

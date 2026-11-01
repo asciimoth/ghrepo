@@ -52,7 +52,7 @@ func TestTLSFetchAndCache(t *testing.T) {
 		case "/ok":
 			_, _ = fmt.Fprint(w, "package-data")
 		case "/redirect":
-			http.Redirect(w, req, "https://redirect.test/ok", http.StatusFound)
+			http.Redirect(w, req, "https://redirect.test/ok?sig=release-token", http.StatusFound)
 		case "/bad-redirect":
 			http.Redirect(w, req, "https://other.test/ok", http.StatusFound)
 		case "/http-redirect":

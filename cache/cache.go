@@ -71,7 +71,12 @@ func (h HTTPFetcher) Fetch(ctx context.Context, raw string, sources, redirects [
 			return errors.New("too many redirects")
 		}
 		allowed := append(append([]string(nil), sources...), redirects...)
-		return contract.ValidateSourceURL(req.URL.String(), allowed)
+		// Release assets use a signed query on the redirect target. The
+		// manifest source itself must still have no query parameters.
+		target := *req.URL
+		target.RawQuery = ""
+		target.ForceQuery = false
+		return contract.ValidateSourceURL(target.String(), allowed)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
 	if err != nil {

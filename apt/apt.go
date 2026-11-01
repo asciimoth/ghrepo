@@ -173,33 +173,36 @@ func Verify(dir, publicKey string, r contract.Repository, m contract.Manifest) e
 	if err := m.Validate(r); err != nil {
 		return err
 	}
+	var err error
+	publicKey, err = filepath.Abs(publicKey)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(publicKey); err != nil {
 		return err
 	}
-	verified, err := os.CreateTemp("", "ghrepo-verified-release-*")
+	verifiedDir, err := os.MkdirTemp("", "ghrepo-verified-release-*")
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(verified.Name()) }()
-	if err := verified.Close(); err != nil {
-		return err
-	}
-	cmd := exec.Command("gpgv", "--status-fd", "1", "--keyring", publicKey, "--output", verified.Name(), filepath.Join(dir, "InRelease"))
-	status, err := cmd.Output()
+	defer func() { _ = os.RemoveAll(verifiedDir) }()
+	verifiedPath := filepath.Join(verifiedDir, "Release")
+	cmd := exec.Command("gpgv", "--status-fd", "1", "--keyring", publicKey, "--output", verifiedPath, filepath.Join(dir, "InRelease"))
+	status, err := cmd.CombinedOutput()
 	if err != nil {
-		return errors.New("APT Release signature verification failed")
+		return fmt.Errorf("APT Release signature verification failed: %w: %s", err, strings.TrimSpace(string(status)))
 	}
 	validAlgorithm := false
 	for _, line := range strings.Split(string(status), "\n") {
 		parts := strings.Fields(line)
-		if len(parts) >= 10 && parts[0] == "[GNUPG:]" && parts[1] == "VALIDSIG" && (parts[8] == "1" || parts[8] == "2" || parts[8] == "3") && parts[9] == "8" {
+		if len(parts) >= 10 && parts[0] == "[GNUPG:]" && parts[1] == "VALIDSIG" && (parts[8] == "1" || parts[8] == "2" || parts[8] == "3" || parts[8] == "22") && parts[9] == "8" {
 			validAlgorithm = true
 		}
 	}
 	if !validAlgorithm {
 		return errors.New("unsupported APT Release signature algorithm")
 	}
-	cleared, err := os.ReadFile(verified.Name())
+	cleared, err := os.ReadFile(verifiedPath)
 	if err != nil {
 		return err
 	}
@@ -207,7 +210,7 @@ func Verify(dir, publicKey string, r contract.Repository, m contract.Manifest) e
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(cleared, release) {
+	if !sameSignedRelease(cleared, release) {
 		return errors.New("APT Release differs from signed content")
 	}
 	wants, err := readRelease(release, r)
@@ -245,6 +248,15 @@ func Verify(dir, publicKey string, r contract.Repository, m contract.Manifest) e
 		return errors.New("APT Packages hash, size, or content mismatch")
 	}
 	return readPackages(data, active(m))
+}
+
+// GPGv versions differ on whether they retain the blank line before the
+// signature block. Accept only that one extra final newline.
+func sameSignedRelease(cleared, release []byte) bool {
+	if bytes.Equal(cleared, release) {
+		return true
+	}
+	return len(cleared) == len(release)+1 && cleared[len(cleared)-1] == '\n' && bytes.Equal(cleared[:len(release)], release)
 }
 
 type checksum struct {

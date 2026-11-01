@@ -40,6 +40,10 @@ func testCommandEnv() []string {
 	return env
 }
 func prepareFlow(t *testing.T) (Runner, string) {
+	return prepareFlowWithAlgorithm(t, "rsa2048")
+}
+
+func prepareFlowWithAlgorithm(t *testing.T, algorithm string) (Runner, string) {
 	t.Helper()
 	for _, name := range []string{"gpg", "gpgv", "git"} {
 		if _, err := exec.LookPath(name); err != nil {
@@ -53,7 +57,7 @@ func prepareFlow(t *testing.T) (Runner, string) {
 	}
 	t.Setenv("GNUPGHOME", home)
 	key := "Flow Test <flow@example.org>"
-	command(t, dir, "gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-generate-key", key, "rsa2048", "sign", "0")
+	command(t, dir, "gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-generate-key", key, algorithm, "sign", "0")
 	deb := mustRead(t, "../contract/testdata/packages/hello_1.2.0-1_amd64.deb")
 	rpm := mustRead(t, "../contract/testdata/packages/empty-0.1-1.x86_64.rpm")
 	fetch := fixtureFetcher{map[string][]byte{"https://example.com/hello.deb": deb, "https://example.com/empty.rpm": rpm}}
@@ -66,6 +70,15 @@ func prepareFlow(t *testing.T) (Runner, string) {
 		t.Fatal(err)
 	}
 	return runner, dir
+}
+func TestEdDSAFlow(t *testing.T) {
+	runner, _ := prepareFlowWithAlgorithm(t, "ed25519")
+	ctx := context.Background()
+	for _, command := range []string{"rebuild", "check", "site-build"} {
+		if err := runner.Run(ctx, []string{command}); err != nil {
+			t.Fatalf("%s: %v", command, err)
+		}
+	}
 }
 func TestRebuildCheckDryRunAndPublish(t *testing.T) {
 	runner, dir := prepareFlow(t)

@@ -45,7 +45,8 @@ lowercase DNS names, without ports or wildcards. The first request host must be
 in `source_hosts`. Every redirect host must be in `source_hosts` or
 `redirect_hosts`. All requests and redirects use HTTPS. Version 1 source URLs do
 not allow userinfo, query parameters, fragments, or credentials. A redirect to a
-private address is also rejected.
+private address is also rejected. Redirect targets can have query parameters, as
+used by signed GitHub release asset URLs.
 
 APT uses one flat repository at `<base_url>/deb/`. The client source uses
 `deb [signed-by=...] <base_url>/deb/ ./` with no component token. The chosen
@@ -188,14 +189,14 @@ added to an immutable release.
 
 ## Signed output and support limits
 
-| Item                    | Version 1 support                                                                               | Other input                                              |
-| ----------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| DEB archive             | `ar` with `debian-binary` value `2.0`, `control.tar.gz`, and `data.tar.gz`                      | `unsupported DEB archive member or compression`          |
-| DEB control             | UTF-8 control file with required Package, Version, Architecture, Maintainer, Description fields | `invalid DEB control field`                              |
-| RPM package             | RPM lead major 3 with version 4 headers; gzip, xz, or zstd cpio payload                         | `unsupported RPM package version or payload compression` |
-| RPM repository metadata | gzip XML `primary`, `filelists`, and `other`, referenced by `repomd.xml`                        | `unsupported RPM metadata type`                          |
-| Repository signatures   | OpenPGP RSA with SHA-256, detached RPM `repomd.xml.asc` and clear-signed APT `InRelease`        | `unsupported signature algorithm`                        |
-| RPM package signatures  | Existing or locally copied OpenPGP RSA/SHA-256 signatures from configured trusted keys          | `unsupported RPM package signature`                      |
+| Item                    | Version 1 support                                                                                           | Other input                                              |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| DEB archive             | `ar` with `debian-binary` value `2.0`, `control.tar.gz`, and `data.tar.gz`                                  | `unsupported DEB archive member or compression`          |
+| DEB control             | UTF-8 control file with required Package, Version, Architecture, Maintainer, Description fields             | `invalid DEB control field`                              |
+| RPM package             | RPM lead major 3 with version 4 headers; gzip, xz, or zstd cpio payload                                     | `unsupported RPM package version or payload compression` |
+| RPM repository metadata | gzip XML `primary`, `filelists`, and `other`, referenced by `repomd.xml`                                    | `unsupported RPM metadata type`                          |
+| Repository signatures   | OpenPGP RSA or Ed25519 (EdDSA) with SHA-256, detached RPM `repomd.xml.asc` and clear-signed APT `InRelease` | `unsupported signature algorithm`                        |
+| RPM package signatures  | Existing or locally copied OpenPGP RSA or Ed25519 (EdDSA) with SHA-256 from configured trusted keys         | `unsupported RPM package signature`                      |
 
 `deb/Packages`, `deb/Packages.gz`, `deb/Release`, and `deb/InRelease` are
 generated locally. Version 1 does not emit `Release.gpg`. `Acquire-By-Hash` is
@@ -213,12 +214,13 @@ metadata is emitted.
 bytes. It orders packages by served path, uses a fixed gzip header, and sets the
 Release date to the build time. A failed build removes its new directory. The
 caller replaces an older `deb/` directory only after `apt.Verify` checks the
-complete new directory with `KEY.gpg`. Verification checks the RSA/SHA-256 clear
-signature, the signed Release content, the compressed index hash, and each
-indexed package against the active manifest. Unsigned DEB files are allowed. The
-local HTTP compatibility test runs when APT has the Debian packaging backend. It
-checks refresh and package download. Set `GHREPO_APT_INSTALL=1` only in a
-disposable root container to also check installation.
+complete new directory with `KEY.gpg`. Verification checks the RSA or Ed25519
+SHA-256 clear signature, the signed Release content, the compressed index hash,
+and each indexed package against the active manifest. Unsigned DEB files are
+allowed. The local HTTP compatibility test runs when APT has the Debian
+packaging backend. It checks refresh and package download. Set
+`GHREPO_APT_INSTALL=1` only in a disposable root container to also check
+installation.
 
 The RPM reader candidate is `github.com/sassoftware/go-rpmutils` v0.4.0. Its
 `ReadHeader`, `GetNEVRA`, and `PayloadReaderExtended` read the checked-in gzip,
@@ -228,8 +230,8 @@ imported test key. The DEB fixture uses Go's `archive/tar` and `compress/gzip`,
 so no third-party DEB reader is needed for the first compression method. The
 `rpm` package generates checksum-named gzip XML `primary`, `filelists`, and
 `other` files. `repomd.xml` records each compressed and open SHA-256, size,
-location, and timestamp. `repomd.xml.asc` is a detached RSA/SHA-256 GPG
-signature. `rpm.Verify` checks this signature, all metadata checksums and
+location, and timestamp. `repomd.xml.asc` is a detached RSA or Ed25519 SHA-256
+GPG signature. `rpm.Verify` checks this signature, all metadata checksums and
 package entries against the active manifest, and package bytes when given a site
 root. Retained packages do not appear in new metadata. A failed build removes
 its new output directory. The caller replaces existing metadata only after
@@ -237,21 +239,22 @@ verification.
 
 `metadata-only` leaves upstream RPM bytes unchanged and requires
 `repo_gpgcheck=1`, `gpgcheck=0` in generated client settings. For
-`trusted-packages`, each package needs a full-payload RSA/SHA-256 signature that
-verifies against a configured public key. The metadata signing key does not
-grant trust to package bytes. `rpm.SignCopy` uses the local GPG keyring or agent
-to sign a general RPM header and its payload, writes a new copy, and verifies
-the copy against configured trusted keys. It never exports a private key. The
-caller must inspect, hash, and upload the final copy, then use that copy's hash
-and served path in `packages.yaml`. The optional local HTTP compatibility test
-uses RPM and DNF to check repository signature verification, refresh, lookup,
-and download. DNF 4 passes this test in the local Nix environment. It checks RPM
-installation in isolated RPM databases for both signature policies. With
-`GHREPO_RPM_INSTALL=1`, DNF installs the unsigned fixture under `gpgcheck=0`,
-rejects it under `gpgcheck=1`, and installs the signed copy under `gpgcheck=1`.
-Run this option in a disposable root or user namespace environment. Neither tool
-is a normal host requirement. APT compatibility is checked by the local HTTP
-test where a working APT client is available.
+`trusted-packages`, each package needs a full-payload RSA or Ed25519 SHA-256
+signature that verifies against a configured public key. The metadata signing
+key does not grant trust to package bytes. `rpm.SignCopy` uses the local GPG
+keyring or agent to sign a general RPM header and its payload, writes a new
+copy, and verifies the copy against configured trusted keys. It never exports a
+private key. The caller must inspect, hash, and upload the final copy, then use
+that copy's hash and served path in `packages.yaml`. The optional local HTTP
+compatibility test uses RPM and DNF to check repository signature verification,
+refresh, lookup, and download. DNF 4 passes this test in the local Nix
+environment. It checks RPM installation in isolated RPM databases for both
+signature policies. With `GHREPO_RPM_INSTALL=1`, DNF installs the unsigned
+fixture under `gpgcheck=0`, rejects it under `gpgcheck=1`, and installs the
+signed copy under `gpgcheck=1`. Run this option in a disposable root or user
+namespace environment. Neither tool is a normal host requirement. APT
+compatibility is checked by the local HTTP test where a working APT client is
+available.
 
 ## Site artifact
 

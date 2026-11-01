@@ -17,6 +17,16 @@ import (
 
 // Run this test in a disposable environment with rpm and DNF installed.
 func TestCompatibility(t *testing.T) {
+	algorithms := []string{"rsa2048", "ed25519"}
+	if selected := os.Getenv("GHREPO_TEST_KEY_ALGORITHM"); selected != "" {
+		algorithms = []string{selected}
+	}
+	for _, algorithm := range algorithms {
+		t.Run(algorithm, func(t *testing.T) { testCompatibility(t, algorithm) })
+	}
+}
+
+func testCompatibility(t *testing.T, algorithm string) {
 	for _, tool := range []string{"rpm"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			if os.Getenv("GHREPO_RPM_INSTALL") == "1" {
@@ -39,7 +49,7 @@ func TestCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, pub, cacheRoot, r, m, local := fixture(t)
+	root, pub, cacheRoot, r, m, local := fixtureWithAlgorithm(t, algorithm)
 	t.Chdir(root)
 	site := filepath.Join(root, "site")
 	for _, fixtureName := range []string{"payload-gzip.rpm", "payload-xz.rpm"} {
@@ -95,10 +105,13 @@ func TestCompatibility(t *testing.T) {
 	if err := os.WriteFile(armored, pubText, 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(site, "KEY.gpg"), mustRead(t, pub), 0644); err != nil {
+		t.Fatal(err)
+	}
 	runDNF := func(policy string) {
 		t.Helper()
 		install := filepath.Join(root, "install-"+policy)
-		args := []string{"--assumeyes", "--disableplugin=versionlock", "--installroot=" + install, "--releasever=1", "--setopt=reposdir=" + filepath.Join(root, "empty-repos"), "--setopt=cachedir=" + filepath.Join(root, "cache-"+policy), "--repofrompath=fixture," + server.URL + "/rpm/", "--setopt=fixture.repo_gpgcheck=1", "--setopt=fixture.gpgcheck=" + policy, "--setopt=fixture.gpgkey=" + server.URL + "/KEY.asc", "makecache"}
+		args := []string{"--assumeyes", "--disableplugin=versionlock", "--installroot=" + install, "--releasever=1", "--setopt=reposdir=" + filepath.Join(root, "empty-repos"), "--setopt=cachedir=" + filepath.Join(root, "cache-"+policy), "--repofrompath=fixture," + server.URL + "/rpm/", "--setopt=fixture.repo_gpgcheck=1", "--setopt=fixture.gpgcheck=" + policy, "--setopt=fixture.gpgkey=" + server.URL + "/KEY.gpg", "makecache"}
 		cmd := exec.Command(dnfTool, args...)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("DNF makecache: %v: %s", err, output)
@@ -140,7 +153,7 @@ func TestCompatibility(t *testing.T) {
 			"--setopt=cachedir=" + filepath.Join(root, "reject-cache"),
 			"--repofrompath=fixture," + server.URL + "/rpm/",
 			"--setopt=fixture.repo_gpgcheck=1", "--setopt=fixture.gpgcheck=1",
-			"--setopt=fixture.gpgkey=" + server.URL + "/KEY.asc",
+			"--setopt=fixture.gpgkey=" + server.URL + "/KEY.gpg",
 			"install", m.Packages[0].Identity.Name,
 		}
 		cmd := exec.Command(dnfTool, args...)

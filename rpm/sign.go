@@ -3,6 +3,7 @@ package rpm
 import (
 	"bytes"
 	"crypto"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -51,23 +52,25 @@ func SignCopy(source, destination string, local contract.Local, trustedKeys []st
 	}
 	// gpg signs the general header and the general header plus payload. No
 	// private key material leaves the selected local keyring or signing agent.
-	rsa, e := signBytes(raw[span.Start:span.End], local)
+	headerSignature, e := signBytes(raw[span.Start:span.End], local)
 	if e != nil {
 		return e
 	}
-	pgp, e := signBytes(raw[span.Start:], local)
+	payloadSignature, e := signBytes(raw[span.Start:], local)
 	if e != nil {
 		return e
 	}
-	for _, sig := range [][]byte{rsa, pgp} {
+	var algorithm packet.PublicKeyAlgorithm
+	for _, sig := range [][]byte{headerSignature, payloadSignature} {
 		pkt, e := packet.Read(bytes.NewReader(sig))
 		if e != nil {
 			return e
 		}
 		v, ok := pkt.(*packet.Signature)
-		if !ok || v.PubKeyAlgo != packet.PubKeyAlgoRSA || v.Hash != crypto.SHA256 {
+		if !ok || (v.PubKeyAlgo != packet.PubKeyAlgoRSA && v.PubKeyAlgo != packet.PubKeyAlgoEdDSA) || v.Hash != crypto.SHA256 || (algorithm != 0 && v.PubKeyAlgo != algorithm) {
 			return errors.New("unsupported RPM package signature algorithm")
 		}
+		algorithm = v.PubKeyAlgo
 	}
 	in, e := os.Open(source)
 	if e != nil {
@@ -84,8 +87,13 @@ func SignCopy(source, destination string, local contract.Local, trustedKeys []st
 		return e
 	}
 	defer func() { _ = os.Remove(tmpPath) }()
-	if _, e = rpmutils.RewriteWithSignatures(in, tmpPath, pgp, rsa); e != nil {
+	if _, e = rpmutils.RewriteWithSignatures(in, tmpPath, payloadSignature, headerSignature); e != nil {
 		return fmt.Errorf("write signed RPM: %w", e)
+	}
+	if algorithm == packet.PubKeyAlgoEdDSA {
+		if e = useEdDSASignatureTags(tmpPath); e != nil {
+			return e
+		}
 	}
 	final, _, _, e := inspect.File(tmpPath, int64(len(raw))+1<<20)
 	if e != nil {
@@ -108,6 +116,42 @@ func SignCopy(source, destination string, local contract.Local, trustedKeys []st
 	}
 	return nil
 }
+
+// RewriteWithSignatures writes RSA tag numbers. RPM stores EdDSA signatures
+// under the historical DSA and GPG tag numbers. Change only those index tags;
+// the OpenPGP packets and signed package bytes stay the same.
+func useEdDSASignatureTags(name string) error {
+	data, err := os.ReadFile(name)
+	if err != nil {
+		return err
+	}
+	if len(data) < 112 || binary.BigEndian.Uint32(data[96:100]) != 0x8eade801 {
+		return errors.New("invalid RPM signature header")
+	}
+	count := uint64(binary.BigEndian.Uint32(data[104:108]))
+	if count > uint64(len(data)-112)/16 {
+		return errors.New("invalid RPM signature index")
+	}
+	headerTags, payloadTags := 0, 0
+	for i := uint64(0); i < count; i++ {
+		offset := 112 + int(i)*16
+		switch binary.BigEndian.Uint32(data[offset : offset+4]) {
+		case 268: // RSAHEADER
+			binary.BigEndian.PutUint32(data[offset:offset+4], 267) // DSAHEADER
+			headerTags++
+		case 1002: // PGP
+			binary.BigEndian.PutUint32(data[offset:offset+4], 1005) // GPG
+			payloadTags++
+		case 267, 1005:
+			return errors.New("duplicate RPM signature tag")
+		}
+	}
+	if headerTags != 1 || payloadTags != 1 {
+		return errors.New("missing RPM signature tag")
+	}
+	return os.WriteFile(name, data, 0600)
+}
+
 func signBytes(data []byte, local contract.Local) ([]byte, error) {
 	dir, err := os.MkdirTemp("", "ghrepo-rpm-sign-*")
 	if err != nil {

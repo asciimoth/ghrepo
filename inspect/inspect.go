@@ -245,14 +245,15 @@ func rpm(data []byte) (Metadata, error) {
 	for _, item := range []struct {
 		name string
 		tag  int
-	}{{"RSA", rpmutils.SIG_RSA}, {"DSA", rpmutils.SIG_DSA}, {"PGP", rpmutils.SIG_PGP}, {"GPG", rpmutils.SIG_GPG}} {
+		algo packet.PublicKeyAlgorithm
+	}{{"RSA", rpmutils.SIG_RSA, packet.PubKeyAlgoRSA}, {"DSA", rpmutils.SIG_DSA, packet.PubKeyAlgoEdDSA}, {"PGP", rpmutils.SIG_PGP, packet.PubKeyAlgoRSA}, {"GPG", rpmutils.SIG_GPG, packet.PubKeyAlgoEdDSA}} {
 		if raw, e := hdr.GetBytes(item.tag); e == nil && len(raw) > 0 {
 			sig, err := packet.Read(bytes.NewReader(raw))
 			if err != nil {
 				return Metadata{}, errors.New("invalid RPM package signature")
 			}
 			v4, ok := sig.(*packet.Signature)
-			if !ok || v4.PubKeyAlgo != packet.PubKeyAlgoRSA || v4.Hash != crypto.SHA256 {
+			if !ok || v4.PubKeyAlgo != item.algo || v4.Hash != crypto.SHA256 {
 				return Metadata{}, errors.New("unsupported RPM package signature")
 			}
 			signatures = append(signatures, item.name)

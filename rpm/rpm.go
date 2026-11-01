@@ -421,20 +421,20 @@ func VerifyPackageSignature(name string, keyPaths []string, policy string) error
 		return fmt.Errorf("RPM package signature verification failed: %w", err)
 	}
 	for _, sig := range sigs {
-		if sig.Signer != nil && !sig.HeaderOnly && sig.Hash == crypto.SHA256 && signatureUsesRSA(sig) {
+		if sig.Signer != nil && !sig.HeaderOnly && sig.Hash == crypto.SHA256 && signatureUsesSupportedAlgorithm(sig) {
 			return nil
 		}
 	}
-	return errors.New("RPM package has no trusted RSA/SHA-256 signature")
+	return errors.New("RPM package has no trusted RSA or EdDSA SHA-256 signature")
 }
 
-func signatureUsesRSA(sig *rpmutils.Signature) bool {
+func signatureUsesSupportedAlgorithm(sig *rpmutils.Signature) bool {
 	if key := sig.Signer.PrimaryKey; key != nil && key.KeyId == sig.KeyId {
-		return key.PubKeyAlgo == packet.PubKeyAlgoRSA
+		return key.PubKeyAlgo == packet.PubKeyAlgoRSA || key.PubKeyAlgo == packet.PubKeyAlgoEdDSA
 	}
 	for _, subkey := range sig.Signer.Subkeys {
 		if key := subkey.PublicKey; key != nil && key.KeyId == sig.KeyId {
-			return key.PubKeyAlgo == packet.PubKeyAlgoRSA
+			return key.PubKeyAlgo == packet.PubKeyAlgoRSA || key.PubKeyAlgo == packet.PubKeyAlgoEdDSA
 		}
 	}
 	return false
@@ -446,16 +446,21 @@ func Verify(dir, publicKey, packageRoot string, r contract.Repository, m contrac
 	if err := m.Validate(r); err != nil {
 		return err
 	}
+	var err error
+	publicKey, err = filepath.Abs(publicKey)
+	if err != nil {
+		return err
+	}
 	repopath := filepath.Join(dir, "repodata", "repomd.xml")
 	cmd := exec.Command("gpgv", "--status-fd", "1", "--keyring", publicKey, repopath+".asc", repopath)
-	status, err := cmd.Output()
+	status, err := cmd.CombinedOutput()
 	if err != nil {
-		return errors.New("RPM repomd signature verification failed")
+		return fmt.Errorf("RPM repomd signature verification failed: %w: %s", err, strings.TrimSpace(string(status)))
 	}
 	good := false
 	for _, line := range strings.Split(string(status), "\n") {
 		p := strings.Fields(line)
-		if len(p) >= 10 && p[0] == "[GNUPG:]" && p[1] == "VALIDSIG" && p[9] == "8" && (p[8] == "1" || p[8] == "2" || p[8] == "3") {
+		if len(p) >= 10 && p[0] == "[GNUPG:]" && p[1] == "VALIDSIG" && p[9] == "8" && (p[8] == "1" || p[8] == "2" || p[8] == "3" || p[8] == "22") {
 			good = true
 		}
 	}

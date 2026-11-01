@@ -17,6 +17,10 @@ import (
 )
 
 func fixture(t *testing.T) (string, string, string, contract.Repository, contract.Manifest, contract.Local) {
+	return fixtureWithAlgorithm(t, "rsa2048")
+}
+
+func fixtureWithAlgorithm(t *testing.T, algorithm string) (string, string, string, contract.Repository, contract.Manifest, contract.Local) {
 	t.Helper()
 	for _, tool := range []string{"gpg", "gpgv"} {
 		if _, err := exec.LookPath(tool); err != nil {
@@ -32,7 +36,7 @@ func fixture(t *testing.T) (string, string, string, contract.Repository, contrac
 		t.Fatal(err)
 	}
 	key := "RPM Fixture <rpm@example.org>"
-	cmd := exec.Command("gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-generate-key", key, "rsa2048", "sign", "0")
+	cmd := exec.Command("gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-generate-key", key, algorithm, "sign", "0")
 	cmd.Env = append(os.Environ(), "GNUPGHOME="+home)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("key: %v: %s", err, b)
@@ -78,6 +82,36 @@ func fixture(t *testing.T) (string, string, string, contract.Repository, contrac
 		t.Fatal(err)
 	}
 	return root, pub, cacheRoot, r, m, contract.Local{Schema: 1, GPG: contract.LocalGPG{KeyID: key, Home: home}}
+}
+
+func TestEdDSABuildVerify(t *testing.T) {
+	root, pub, cacheRoot, r, m, local := fixtureWithAlgorithm(t, "ed25519")
+	dir := filepath.Join(root, "rpm")
+	if err := Build(dir, cacheRoot, r, m, local); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(dir, pub, filepath.Join(root, "site"), r, m); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEdDSASignCopy(t *testing.T) {
+	root, pub, cacheRoot, _, m, local := fixtureWithAlgorithm(t, "ed25519")
+	source := filepath.Join(cacheRoot, "sha256", m.Packages[0].SHA256)
+	signed := filepath.Join(root, "signed-ed25519.rpm")
+	if err := SignCopy(source, signed, local, []string{pub}); err != nil {
+		t.Fatal(err)
+	}
+	meta, _, _, err := inspect.File(signed, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(meta.SignatureTags) != 2 || meta.SignatureTags[0] != "DSA" || meta.SignatureTags[1] != "GPG" {
+		t.Fatalf("wrong EdDSA signature tags: %v", meta.SignatureTags)
+	}
+	if err := VerifyPackageSignature(signed, []string{pub}, "trusted-packages"); err != nil {
+		t.Fatal(err)
+	}
 }
 func TestBuildVerify(t *testing.T) {
 	root, pub, cacheRoot, r, m, local := fixture(t)

@@ -20,6 +20,10 @@ import (
 )
 
 func fixture(t *testing.T) (string, string, contract.Repository, contract.Manifest, contract.Local, string) {
+	return fixtureWithAlgorithm(t, "rsa2048")
+}
+
+func fixtureWithAlgorithm(t *testing.T, algorithm string) (string, string, contract.Repository, contract.Manifest, contract.Local, string) {
 	t.Helper()
 	if _, err := exec.LookPath("gpg"); err != nil {
 		if os.Getenv("GHREPO_APT_INSTALL") == "1" {
@@ -42,7 +46,7 @@ func fixture(t *testing.T) (string, string, contract.Repository, contract.Manife
 		t.Fatal(err)
 	}
 	key := "Fixture <fixture@example.org>"
-	cmd := exec.Command("gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-generate-key", key, "rsa2048", "sign", "0")
+	cmd := exec.Command("gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-generate-key", key, algorithm, "sign", "0")
 	cmd.Env = append(os.Environ(), "GNUPGHOME="+home)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("generate test key: %v: %s", err, output)
@@ -81,6 +85,57 @@ func fixture(t *testing.T) (string, string, contract.Repository, contract.Manife
 		t.Fatal(err)
 	}
 	return root, public, r, m, contract.Local{Schema: 1, GPG: contract.LocalGPG{KeyID: key, Home: home}}, filepath.Join(root, "cache")
+}
+
+func TestEdDSABuildVerify(t *testing.T) {
+	root, key, r, m, local, cacheRoot := fixtureWithAlgorithm(t, "ed25519")
+	dir := filepath.Join(root, "deb")
+	if err := Build(dir, cacheRoot, r, m, local); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(dir, key, r, m); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCrossVersionGPGv(t *testing.T) {
+	if os.Getenv("GHREPO_APT_CROSS_GPGV") != "1" {
+		t.Skip("set GHREPO_APT_CROSS_GPGV=1 to run the Docker check")
+	}
+	root, _, r, m, local, cacheRoot := fixtureWithAlgorithm(t, "ed25519")
+	dir := filepath.Join(root, "deb")
+	if err := Build(dir, cacheRoot, r, m, local); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("docker", "run", "--rm", "--mount", "type=bind,src="+root+",dst=/work", "ubuntu:24.04", "gpgv", "--keyring", "/work/KEY.gpg", "--output", "/work/verified", "/work/deb/InRelease")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("container gpgv: %v: %s", err, output)
+	}
+	verified, err := os.ReadFile(filepath.Join(root, "verified"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := os.ReadFile(filepath.Join(dir, "Release"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameSignedRelease(verified, release) {
+		t.Fatalf("cross-version GPGv changed signed content: verified=%q release=%q", verified, release)
+	}
+}
+
+func TestSameSignedRelease(t *testing.T) {
+	release := []byte("Origin: example\nSHA256:\n hash 1 Packages\n")
+	for _, cleared := range [][]byte{release, append(bytes.Clone(release), '\n')} {
+		if !sameSignedRelease(cleared, release) {
+			t.Fatalf("rejected signed content %q", cleared)
+		}
+	}
+	for _, cleared := range [][]byte{append(bytes.Clone(release), '\n', '\n'), []byte("Origin: other\nSHA256:\n hash 1 Packages\n\n")} {
+		if sameSignedRelease(cleared, release) {
+			t.Fatalf("accepted changed signed content %q", cleared)
+		}
+	}
 }
 
 func TestBuildVerifyAndDeterminism(t *testing.T) {
@@ -288,13 +343,23 @@ func TestControlFieldsKeepDependenciesAndRejectIndexOverrides(t *testing.T) {
 }
 
 func TestAPTClientCompatibility(t *testing.T) {
+	algorithms := []string{"rsa2048", "ed25519"}
+	if selected := os.Getenv("GHREPO_TEST_KEY_ALGORITHM"); selected != "" {
+		algorithms = []string{selected}
+	}
+	for _, algorithm := range algorithms {
+		t.Run(algorithm, func(t *testing.T) { testAPTClientCompatibility(t, algorithm) })
+	}
+}
+
+func testAPTClientCompatibility(t *testing.T, algorithm string) {
 	if _, err := exec.LookPath("apt-get"); err != nil {
 		if os.Getenv("GHREPO_APT_INSTALL") == "1" {
 			t.Fatal("apt-get is required for the container compatibility test")
 		}
 		t.Skip("apt-get is unavailable")
 	}
-	root, key, r, m, local, cacheRoot := fixture(t)
+	root, key, r, m, local, cacheRoot := fixtureWithAlgorithm(t, algorithm)
 	debDir := filepath.Join(root, "deb")
 	if err := Build(debDir, cacheRoot, r, m, local); err != nil {
 		t.Fatal(err)
