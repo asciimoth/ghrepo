@@ -35,9 +35,15 @@ just release 1.2.3
 
 The command runs `just check` and a local signed snapshot build before it
 creates and pushes the `v1.2.3` tag. GoReleaser then uploads the signed files.
-The release stops if the working tree is not clean or the tag already exists.
-Verify a downloaded asset and its detached signature with
-`gpg --verify FILE.sig FILE`; import and trust the release public key first.
+The release stops if the working tree is not clean or the tag already exists. To
+add the uploaded DEB and RPM packages to a local ghrepo repository, set
+`GHREPO_REPO_DIR` to its directory before running `just release`. The release
+command reads the package names from GoReleaser, adds their GitHub Release URLs
+with `ghrepo add`, and verifies the downloaded packages. The repository must
+allow `github.com` as a source host. The command updates `packages.yaml`; run
+`ghrepo publish` after the release to build and push repository metadata. Verify
+a downloaded asset and its detached signature with `gpg --verify FILE.sig FILE`;
+import and trust the release public key first.
 
 ## Set up a new GitHub repository
 
