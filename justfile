@@ -1,5 +1,6 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 set positional-arguments := true
+set dotenv-load := true
 
 # Run all project checks.
 check: tidy typos fmt lint vet test test-e2e fuzz
