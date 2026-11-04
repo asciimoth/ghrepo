@@ -485,7 +485,7 @@ func (c Runner) publish(ctx context.Context, args []string) error {
 	return nil
 }
 
-// copyPreviewRepository gives publish its own worktree and Git database.
+// copyPreviewRepository gives dry-run commands their own worktree and Git database.
 func copyPreviewRepository(root string) (string, error) {
 	previewDir, err := os.MkdirTemp("", "ghrepo-publish-*")
 	if err != nil {
@@ -523,6 +523,9 @@ func copyPreviewRepository(root string) (string, error) {
 		}
 		if rel == "." {
 			return nil
+		}
+		if rel == ".direnv" {
+			return filepath.SkipDir
 		}
 		destination := filepath.Join(previewDir, rel)
 		info, err := entry.Info()

@@ -225,6 +225,39 @@ func TestRebuildCheckDryRunAndPublish(t *testing.T) {
 	}
 }
 
+func TestCheckDryRunSkipsDirenvExternalSymlink(t *testing.T) {
+	runner, dir := prepareFlow(t)
+	ctx := context.Background()
+	if err := runner.Run(ctx, []string{"rebuild"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"check"}); err != nil {
+		t.Fatal(err)
+	}
+	ignore := filepath.Join(dir, ".gitignore")
+	file, err := os.OpenFile(ignore, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("/.direnv\n"); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	direnv := filepath.Join(dir, ".direnv")
+	if err := os.Mkdir(direnv, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(direnv, "flake-profile-example")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(ctx, []string{"check", "--dry-run"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCopyPreviewRepositoryKeepsSymlinksInsideCopy(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0700); err != nil {
