@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/asciimoth/ghrepo/apt"
@@ -36,11 +37,12 @@ func (c Runner) progressOutput() io.Writer {
 	return os.Stderr
 }
 
-func (c Runner) downloadProgress(stage string, index, total int, path string, run func() error) error {
-	_, _ = fmt.Fprintf(c.progressOutput(), "%s %d/%d: %s\n", stage, index, total, path)
+func (c Runner) fetchPackages(ctx context.Context, root string, r contract.Repository, packages []contract.Package, stage string, refresh func(index int) bool) (map[string]bool, error) {
+	var mu sync.Mutex
+	active := make(map[int]time.Time)
+	fetched := make(map[string]bool)
 	done := make(chan struct{})
 	stopped := make(chan struct{})
-	start := time.Now()
 	go func() {
 		defer close(stopped)
 		ticker := time.NewTicker(15 * time.Second)
@@ -48,16 +50,30 @@ func (c Runner) downloadProgress(stage string, index, total int, path string, ru
 		for {
 			select {
 			case <-ticker.C:
-				_, _ = fmt.Fprintf(c.progressOutput(), "%s %d/%d: %s (%s elapsed)\n", stage, index, total, path, time.Since(start).Round(time.Second))
+				mu.Lock()
+				for index, start := range active {
+					_, _ = fmt.Fprintf(c.progressOutput(), "%s %d/%d: %s (%s elapsed)\n", stage, index+1, len(packages), packages[index].Path, time.Since(start).Round(time.Second))
+				}
+				mu.Unlock()
 			case <-done:
 				return
 			}
 		}
 	}()
-	err := run()
+	_, err := cache.FetchAll(ctx, root, r, packages, c.Fetcher, refresh, func(index int, finished bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if finished {
+			delete(active, index)
+			fetched[packages[index].Path] = true
+			return
+		}
+		active[index] = time.Now()
+		_, _ = fmt.Fprintf(c.progressOutput(), "%s %d/%d: %s\n", stage, index+1, len(packages), packages[index].Path)
+	})
 	close(done)
 	<-stopped
-	return err
+	return fetched, err
 }
 func (c Runner) transaction() string { return filepath.Join(c.root(), ".ghrepo-transaction") }
 
@@ -127,10 +143,8 @@ func (c Runner) rebuild(ctx context.Context) error {
 		return errors.New("signing key is not configured")
 	}
 	_, _, cacheRoot := c.paths()
-	for _, p := range m.Packages {
-		if _, err := cache.Ensure(ctx, cacheRoot, r, p, c.Fetcher); err != nil {
-			return err
-		}
+	if _, err := cache.FetchAll(ctx, cacheRoot, r, m.Packages, c.Fetcher, nil, nil); err != nil {
+		return err
 	}
 	dir := c.transaction()
 	if err := os.Mkdir(dir, 0700); err != nil {
@@ -353,6 +367,11 @@ func (c Runner) stageTrustedKeys(r contract.Repository, root string) error {
 }
 
 func (c Runner) check(ctx context.Context, refreshSources bool) error {
+	return c.checkWithFreshSources(ctx, refreshSources, nil)
+}
+
+// freshSources contains paths downloaded and checked earlier in this run.
+func (c Runner) checkWithFreshSources(ctx context.Context, refreshSources bool, freshSources map[string]bool) error {
 	if err := c.recoverTransaction(); err != nil {
 		return err
 	}
@@ -364,22 +383,11 @@ func (c Runner) check(ctx context.Context, refreshSources bool) error {
 		return err
 	}
 	_, _, cacheRoot := c.paths()
-	for i, p := range m.Packages {
-		if !refreshSources && cache.VerifyFile(filepath.Join(cacheRoot, "sha256", p.SHA256), p) == nil {
-			continue
-		}
-		err := c.downloadProgress("Checking source", i+1, len(m.Packages), p.Path, func() error {
-			var err error
-			if refreshSources {
-				_, err = cache.FetchVerified(ctx, cacheRoot, r, p, c.Fetcher)
-			} else {
-				_, err = cache.Ensure(ctx, cacheRoot, r, p, c.Fetcher)
-			}
-			return err
-		})
-		if err != nil {
-			return fmt.Errorf("package %s: %w", p.Path, err)
-		}
+	refresh := func(index int) bool {
+		return refreshSources && !freshSources[m.Packages[index].Path]
+	}
+	if _, err := c.fetchPackages(ctx, cacheRoot, r, m.Packages, "Checking source", refresh); err != nil {
+		return err
 	}
 	key := filepath.Join(c.root(), "KEY.gpg")
 	if err := apt.Verify(filepath.Join(c.root(), "deb"), key, r, m); err != nil {
@@ -435,7 +443,8 @@ func (c Runner) publish(ctx context.Context, args []string) error {
 		return err
 	}
 	_, _ = fmt.Fprintln(c.progressOutput(), "Syncing packages")
-	if err := c.sync(ctx, nil); err != nil {
+	freshSources, err := c.syncTracked(ctx, nil)
+	if err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintln(c.progressOutput(), "Building metadata")
@@ -443,7 +452,7 @@ func (c Runner) publish(ctx context.Context, args []string) error {
 		return err
 	}
 	_, _ = fmt.Fprintln(c.progressOutput(), "Checking public sources and site")
-	if err := c.check(ctx, true); err != nil {
+	if err := c.checkWithFreshSources(ctx, true, freshSources); err != nil {
 		return err
 	}
 	if err := site.RenderReadme(c.root()); err != nil {

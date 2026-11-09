@@ -66,13 +66,19 @@ func build(ctx context.Context, checkout, output string, fetcher cache.Fetcher, 
 	if err := copyInputs(checkout, stage, r); err != nil {
 		return err
 	}
-	for _, p := range m.Packages {
-		var name string
+	var names []string
+	if verifiedRoot == "" {
+		names, err = cache.FetchAll(ctx, downloads, r, m.Packages, fetcher, func(int) bool { return true }, nil)
+		if err != nil {
+			return err
+		}
+	}
+	for index, p := range m.Packages {
+		name := filepath.Join(downloads, "sha256", p.SHA256)
 		if verifiedRoot != "" {
-			name = filepath.Join(downloads, "sha256", p.SHA256)
 			err = cache.VerifyFile(name, p)
 		} else {
-			name, err = cache.FetchVerified(ctx, downloads, r, p, fetcher)
+			name = names[index]
 		}
 		if err != nil {
 			return fmt.Errorf("package %s: %w", p.Path, err)

@@ -198,7 +198,9 @@ file in the same directory before replacement. The `cache` package uses the same
 manifest validator and SHA-256 verifier for cache hits and new downloads.
 `cache.Ensure` stores verified files under `local-cache/sha256/`.
 `cache.FetchVerified` checks the source again even if a valid cache file exists;
-source changes and site builds use this operation. The default HTTP transport
+source changes and site builds use this operation. Batch operations download
+up to four packages at a time. Each file is checked against its manifest size
+and SHA-256 before use. The default HTTP transport
 resolves source hosts and connects only to public addresses, including after
 redirects. Its injected client option is for local TLS tests. The
 `storage.Backend` has an offline in-memory implementation and a GitHub Releases

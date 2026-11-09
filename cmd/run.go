@@ -871,40 +871,30 @@ func sameIdentity(a, b contract.Package) bool {
 	return a.Format == b.Format && a.Identity == b.Identity
 }
 func (c Runner) sync(ctx context.Context, args []string) error {
+	_, err := c.syncTracked(ctx, args)
+	return err
+}
+
+func (c Runner) syncTracked(ctx context.Context, args []string) (map[string]bool, error) {
 	if len(args) != 0 {
-		return errors.New("sync takes no arguments")
+		return nil, errors.New("sync takes no arguments")
 	}
 	r, m, err := c.load()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	_, _, root := c.paths()
 	if c.dryRun {
 		for _, p := range m.Packages {
 			if cache.VerifyFile(filepath.Join(root, "sha256", p.SHA256), p) != nil {
 				if err := c.preview("would download %s", p.URL); err != nil {
-					return err
+					return nil, err
 				}
 			}
 		}
-		return nil
+		return nil, nil
 	}
-	for i, p := range m.Packages {
-		run := func() error {
-			_, err := cache.Ensure(ctx, root, r, p, c.Fetcher)
-			return err
-		}
-		var err error
-		if cache.VerifyFile(filepath.Join(root, "sha256", p.SHA256), p) == nil {
-			err = run()
-		} else {
-			err = c.downloadProgress("Downloading", i+1, len(m.Packages), p.Path, run)
-		}
-		if err != nil {
-			return fmt.Errorf("package %s: %w", p.Path, err)
-		}
-	}
-	return nil
+	return c.fetchPackages(ctx, root, r, m.Packages, "Downloading", nil)
 }
 func (c Runner) sourceSet(ctx context.Context, args []string) error {
 	if len(args) != 2 {

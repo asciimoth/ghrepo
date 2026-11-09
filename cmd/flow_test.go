@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/asciimoth/ghrepo/cache"
@@ -23,11 +24,11 @@ import (
 
 type countingFetcher struct {
 	base  cache.Fetcher
-	calls int
+	calls atomic.Int32
 }
 
 func (f *countingFetcher) Fetch(ctx context.Context, raw string, sources, redirects []string) (io.ReadCloser, error) {
-	f.calls++
+	f.calls.Add(1)
 	return f.base.Fetch(ctx, raw, sources, redirects)
 }
 
@@ -43,8 +44,8 @@ func TestCheckUsesVerifiedCacheAndCanRefreshSources(t *testing.T) {
 	if err := runner.Run(context.Background(), []string{"check"}); err != nil {
 		t.Fatal(err)
 	}
-	if fetcher.calls != 0 {
-		t.Fatalf("cached check made %d source fetches", fetcher.calls)
+	if fetcher.calls.Load() != 0 {
+		t.Fatalf("cached check made %d source fetches", fetcher.calls.Load())
 	}
 	if progress.Len() != 0 {
 		t.Fatalf("cached check reported downloads: %s", progress.String())
@@ -60,19 +61,56 @@ func TestCheckUsesVerifiedCacheAndCanRefreshSources(t *testing.T) {
 	if err := runner.Run(context.Background(), []string{"check"}); err != nil {
 		t.Fatal(err)
 	}
-	if fetcher.calls != 1 {
-		t.Fatalf("invalid cache entry caused %d source fetches, want 1", fetcher.calls)
+	if fetcher.calls.Load() != 1 {
+		t.Fatalf("invalid cache entry caused %d source fetches, want 1", fetcher.calls.Load())
 	}
-	fetcher.calls = 0
+	fetcher.calls.Store(0)
 	progress.Reset()
 	if err := runner.Run(context.Background(), []string{"check", "--refresh-sources"}); err != nil {
 		t.Fatal(err)
 	}
-	if fetcher.calls != len(manifest.Packages) {
-		t.Fatalf("want %d source fetches, got %d", len(manifest.Packages), fetcher.calls)
+	if fetcher.calls.Load() != int32(len(manifest.Packages)) {
+		t.Fatalf("want %d source fetches, got %d", len(manifest.Packages), fetcher.calls.Load())
 	}
 	if !strings.Contains(progress.String(), "Checking source 1/") {
 		t.Fatalf("missing download status: %s", progress.String())
+	}
+}
+
+func TestPublishStagesReuseSourcesFetchedDuringSync(t *testing.T) {
+	runner, _ := prepareFlow(t)
+	_, manifest, err := runner.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, cacheRoot := runner.paths()
+	if err := os.Remove(filepath.Join(cacheRoot, "sha256", manifest.Packages[0].SHA256)); err != nil {
+		t.Fatal(err)
+	}
+	fetcher := &countingFetcher{base: runner.Fetcher}
+	runner.Fetcher = fetcher
+	ctx := context.Background()
+	fresh, err := runner.syncTracked(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh) != 1 || !fresh[manifest.Packages[0].Path] {
+		t.Fatalf("unexpected sources fetched by sync: %v", fresh)
+	}
+	if err := runner.rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.checkWithFreshSources(ctx, true, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if got := fetcher.calls.Load(); got != int32(len(manifest.Packages)) {
+		t.Fatalf("publish stages made %d source fetches, want %d", got, len(manifest.Packages))
+	}
+	if err := runner.check(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := fetcher.calls.Load(); got != int32(2*len(manifest.Packages)) {
+		t.Fatalf("independent source check made %d total fetches", got)
 	}
 }
 

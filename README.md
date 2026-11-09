@@ -161,6 +161,9 @@ you are ready to deploy changes.
 | `ghrepo check`                   | Check cached packages, signatures, and site size; fetch invalid cache entries. |
 | `ghrepo check --refresh-sources` | Download and verify each source URL as well as checking the repository.        |
 
+`sync`, `rebuild`, `check`, and `site-build` download up to four packages at a
+time. Cached packages are reused by `sync`, `rebuild`, and normal `check`.
+
 A selector has the form `FORMAT/NAME/ARCHITECTURE/VERSION`. For example:
 
 ```sh
@@ -219,7 +222,9 @@ seconds.
 `check` verifies the SHA-256 and size of each cached package before it uses it.
 It downloads a package if its cache entry is missing or invalid. Use
 `check --refresh-sources` to check that every public source still serves the
-manifest bytes. `publish` always performs this source check.
+manifest bytes. `publish` always performs this source check. It reuses packages
+downloaded during its `sync` stage and refreshes sources for cache hits. This
+avoids downloading newly fetched packages twice in the same run.
 
 `rebuild` replaces metadata as one recoverable transaction. The ignored
 `.ghrepo-transaction/` directory records interrupted swaps; the next `rebuild`
