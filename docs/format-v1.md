@@ -57,6 +57,16 @@ response body reads. It defaults to 600 seconds and can be set to 1–86400
 seconds. A value of 0 uses the default. These limits apply to the built-in
 package fetcher.
 
+The built-in fetcher makes at most three attempts to open a package source. It
+waits one second before the second attempt and two seconds before the third. It
+retries temporary DNS errors, timeouts, connection resets or refusals, broken
+pipes, unexpected connection closure, and HTTP 408, 429, 500, 502, 503, and 504.
+Each attempt starts from the original source URL and checks redirect policy
+again. Request timeouts apply to each attempt. Context cancellation or its
+deadline stops requests and retry waits. URL policy errors, certificate errors,
+and other HTTP errors are not retried. Once response body reading starts, read
+errors and package size or checksum failures are returned without a retry.
+
 APT uses one flat repository at `<base_url>/deb/`. The client source uses
 `deb [signed-by=...] <base_url>/deb/ ./` with no component token. The chosen
 `suite` and `component` appear in `Release` as `Suite` and `Components`; they do

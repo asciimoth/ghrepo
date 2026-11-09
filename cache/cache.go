@@ -4,6 +4,7 @@ package cache
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/asciimoth/ghrepo/contract"
@@ -29,6 +31,70 @@ type HTTPFetcher struct {
 	ConnectTimeout time.Duration
 	RequestTimeout time.Duration
 }
+
+// downloadError contains a safe diagnostic. The cause can include signed URLs
+// or credentials and must not be included in Error.
+type downloadError struct {
+	message   string
+	cause     error
+	retryable bool
+}
+
+func (e *downloadError) Error() string { return e.message }
+func (e *downloadError) Unwrap() error { return e.cause }
+
+func sourceError(err error) error {
+	message := "source request failed"
+	var dns *net.DNSError
+	var op *net.OpError
+	var certificate *tls.CertificateVerificationError
+	var network net.Error
+	switch {
+	case errors.Is(err, context.Canceled):
+		message = "source request canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		message = "source request timed out"
+	case errors.As(err, &dns):
+		message = "source DNS lookup failed"
+	case errors.As(err, &certificate):
+		message = "source TLS certificate verification failed"
+	case errors.As(err, &network) && network.Timeout():
+		message = "source request timed out"
+	case errors.As(err, &op):
+		message = "source connection failed"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		message = "source connection closed unexpectedly"
+	}
+	return &downloadError{message: message, cause: err, retryable: temporaryFetchError(err)}
+}
+
+// temporaryFetchError uses error types, never error text, to decide whether a
+// new request may succeed. Policy and certificate errors are not temporary.
+func temporaryFetchError(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var diagnostic *downloadError
+	if errors.As(err, &diagnostic) {
+		return diagnostic.retryable
+	}
+	var certificate *tls.CertificateVerificationError
+	if errors.As(err, &certificate) {
+		return false
+	}
+	var dns *net.DNSError
+	if errors.As(err, &dns) {
+		return dns.IsTimeout || dns.IsTemporary
+	}
+	var network net.Error
+	return errors.Is(err, context.DeadlineExceeded) ||
+		(errors.As(err, &network) && network.Timeout()) ||
+		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.EPIPE)
+}
+
+const fetchAttempts = 3
 
 const DefaultConnectTimeout = 10 * time.Second
 const DefaultRequestTimeout = 10 * time.Minute
@@ -64,7 +130,7 @@ func dialPublicWithTimeout(ctx context.Context, network, address string, timeout
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(lookupCtx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("source DNS lookup failed: %w", context.DeadlineExceeded)
 		}
-		return nil, errors.New("source DNS lookup failed")
+		return nil, &downloadError{message: "source DNS lookup failed", cause: err, retryable: temporaryFetchError(err)}
 	}
 	foundPublic := false
 	var lastErr error
@@ -81,7 +147,7 @@ func dialPublicWithTimeout(ctx context.Context, network, address string, timeout
 	if foundPublic {
 		return nil, fmt.Errorf("source connection failed: %w", lastErr)
 	}
-	return nil, errors.New("source resolves to a private address")
+	return nil, &downloadError{message: "source resolves to a private address"}
 }
 
 func (h HTTPFetcher) Fetch(ctx context.Context, raw string, sources, redirects []string) (io.ReadCloser, error) {
@@ -111,7 +177,7 @@ func (h HTTPFetcher) Fetch(ctx context.Context, raw string, sources, redirects [
 	}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
-			return errors.New("too many redirects")
+			return &downloadError{message: "source has too many redirects"}
 		}
 		allowed := append(append([]string(nil), sources...), redirects...)
 		// Release assets use a signed query on the redirect target. The
@@ -119,8 +185,30 @@ func (h HTTPFetcher) Fetch(ctx context.Context, raw string, sources, redirects [
 		target := *req.URL
 		target.RawQuery = ""
 		target.ForceQuery = false
-		return contract.ValidateSourceURL(target.String(), allowed)
+		if err := contract.ValidateSourceURL(target.String(), allowed); err != nil {
+			return &downloadError{message: "source redirect rejected by URL policy", cause: err}
+		}
+		return nil
 	}
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, sourceError(err)
+		}
+		body, err := fetchOnce(ctx, &client, raw)
+		if err == nil || !temporaryFetchError(err) || attempt == fetchAttempts-1 {
+			return body, err
+		}
+		timer := time.NewTimer(time.Second << attempt)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, sourceError(ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+func fetchOnce(ctx context.Context, client *http.Client, raw string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
 	if err != nil {
 		return nil, errors.New("invalid source request")
@@ -131,11 +219,21 @@ func (h HTTPFetcher) Fetch(ctx context.Context, raw string, sources, redirects [
 		if errors.As(err, &urlErr) {
 			err = urlErr.Err
 		}
-		return nil, fmt.Errorf("source download failed: %w", err)
+		var diagnostic *downloadError
+		if errors.As(err, &diagnostic) {
+			return nil, diagnostic
+		}
+		return nil, sourceError(err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("source returned HTTP %d", resp.StatusCode)
+		retryable := resp.StatusCode == http.StatusRequestTimeout ||
+			resp.StatusCode == http.StatusTooManyRequests ||
+			resp.StatusCode == http.StatusInternalServerError ||
+			resp.StatusCode == http.StatusBadGateway ||
+			resp.StatusCode == http.StatusServiceUnavailable ||
+			resp.StatusCode == http.StatusGatewayTimeout
+		return nil, &downloadError{message: fmt.Sprintf("source returned HTTP %d", resp.StatusCode), retryable: retryable}
 	}
 	return resp.Body, nil
 }
@@ -206,8 +304,12 @@ func ensure(ctx context.Context, root string, r contract.Repository, p contract.
 	}
 	body, err := fetcher.Fetch(ctx, p.URL, r.Downloads.SourceHosts, r.Downloads.RedirectHosts)
 	if err != nil {
+		var diagnostic *downloadError
+		if errors.As(err, &diagnostic) {
+			return "", fmt.Errorf("source download failed: %w", diagnostic)
+		}
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return "", fmt.Errorf("source download failed: %w", err)
+			return "", fmt.Errorf("source download failed: %w", sourceError(err))
 		}
 		return "", errors.New("source download failed")
 	}

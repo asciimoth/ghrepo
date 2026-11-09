@@ -143,8 +143,15 @@ func TestFetchFailures(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			p := testEntry("https://source.test/" + path)
 			root := t.TempDir()
-			if _, err := Ensure(context.Background(), root, r, p, fetcher); err == nil {
+			_, err := Ensure(context.Background(), root, r, p, fetcher)
+			if err == nil {
 				t.Fatal("accepted failed download")
+			}
+			if path == "error" && !strings.Contains(err.Error(), "HTTP 500") {
+				t.Fatalf("missing HTTP status: %v", err)
+			}
+			if (path == "redirect" || path == "private" || path == "http") && !strings.Contains(err.Error(), "redirect rejected by URL policy") {
+				t.Fatalf("missing redirect diagnostic: %v", err)
 			}
 			if _, err := os.Stat(root + "/sha256/" + p.SHA256); !os.IsNotExist(err) {
 				t.Fatalf("failed download left cache file: %v", err)
@@ -204,7 +211,7 @@ func TestRequestTimeoutCoversHeadersAndBody(t *testing.T) {
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("want deadline error, got %v", err)
 			}
-			if time.Since(start) > time.Second {
+			if time.Since(start) > 5*time.Second {
 				t.Fatalf("timeout took too long: %s", time.Since(start))
 			}
 		})
@@ -218,5 +225,32 @@ func TestRepositoryFetcherTimeouts(t *testing.T) {
 	fetcher, ok := RepositoryFetcher(nil, r).(HTTPFetcher)
 	if !ok || fetcher.ConnectTimeout != 3*time.Second || fetcher.RequestTimeout != 9*time.Second {
 		t.Fatalf("repository timeouts were not applied: %+v", fetcher)
+	}
+}
+
+func TestSourceErrorRedaction(t *testing.T) {
+	secret := "https://redirect.test/file?token=private-credential"
+	for _, tt := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"dns", &net.DNSError{Err: secret, Name: secret}, "DNS lookup failed"},
+		{"connection", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New(secret)}, "connection failed"},
+		{"tls", &tls.CertificateVerificationError{Err: errors.New(secret)}, "TLS certificate verification failed"},
+		{"timeout", fmt.Errorf("%s: %w", secret, context.DeadlineExceeded), "timed out"},
+		{"canceled", fmt.Errorf("%s: %w", secret, context.Canceled), "canceled"},
+		{"eof", io.EOF, "closed unexpectedly"},
+		{"unknown", errors.New(secret), "request failed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := FetchVerified(context.Background(), t.TempDir(), testConfig(), testEntry("https://source.test/file"), failingFetcher{err: sourceError(tt.err)})
+			if err == nil || !strings.Contains(err.Error(), tt.want) || strings.Contains(err.Error(), secret) {
+				t.Fatalf("unsafe or missing diagnostic: %v", err)
+			}
+			if !errors.Is(err, tt.err) {
+				t.Fatalf("lost error cause: %v", err)
+			}
+		})
 	}
 }
