@@ -43,7 +43,7 @@ var commandHelp = map[string]string{
 	"remove":       "Usage: ghrepo remove [--dry-run] SELECTOR...",
 	"prune":        "Usage: ghrepo prune [--apply] [--dry-run]",
 	"rebuild":      "Usage: ghrepo rebuild [--dry-run]",
-	"check":        "Usage: ghrepo check [--dry-run]",
+	"check":        "Usage: ghrepo check [--refresh-sources] [--dry-run]",
 	"publish":      "Usage: ghrepo publish [--dry-run] [--message TEXT]",
 	"gc":           "Usage: ghrepo gc",
 	"site-build":   "Usage: ghrepo site-build [--dry-run]",

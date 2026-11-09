@@ -104,13 +104,14 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		}
 		return c.rebuild(ctx)
 	case "check":
-		if len(args) != 1 {
-			return errors.New("usage: ghrepo check")
+		if len(args) > 2 || (len(args) == 2 && args[1] != "--refresh-sources") {
+			return errors.New("usage: ghrepo check [--refresh-sources]")
 		}
+		refreshSources := len(args) == 2
 		if c.dryRun {
-			return c.previewBuild(ctx, "check")
+			return c.previewBuild(ctx, "check", refreshSources)
 		}
-		return c.check(ctx)
+		return c.check(ctx, refreshSources)
 	case "publish":
 		return c.publish(ctx, args[1:])
 	case "gc":
@@ -153,7 +154,7 @@ func (c Runner) preview(format string, args ...any) error {
 	return err
 }
 
-func (c Runner) previewBuild(ctx context.Context, name string) error {
+func (c Runner) previewBuild(ctx context.Context, name string, refreshSources ...bool) error {
 	previewDir, err := copyPreviewRepository(c.root())
 	if err != nil {
 		return err
@@ -164,7 +165,7 @@ func (c Runner) previewBuild(ctx context.Context, name string) error {
 	case "rebuild":
 		err = c.rebuild(ctx)
 	case "check":
-		err = c.check(ctx)
+		err = c.check(ctx, len(refreshSources) != 0 && refreshSources[0])
 	case "site-build":
 		err = site.Build(ctx, c.root(), filepath.Join(c.root(), "build", "site"), c.Fetcher)
 	case "readme-build":

@@ -352,7 +352,7 @@ func (c Runner) stageTrustedKeys(r contract.Repository, root string) error {
 	return nil
 }
 
-func (c Runner) check(ctx context.Context) error {
+func (c Runner) check(ctx context.Context, refreshSources bool) error {
 	if err := c.recoverTransaction(); err != nil {
 		return err
 	}
@@ -365,8 +365,16 @@ func (c Runner) check(ctx context.Context) error {
 	}
 	_, _, cacheRoot := c.paths()
 	for i, p := range m.Packages {
+		if !refreshSources && cache.VerifyFile(filepath.Join(cacheRoot, "sha256", p.SHA256), p) == nil {
+			continue
+		}
 		err := c.downloadProgress("Checking source", i+1, len(m.Packages), p.Path, func() error {
-			_, err := cache.FetchVerified(ctx, cacheRoot, r, p, c.Fetcher)
+			var err error
+			if refreshSources {
+				_, err = cache.FetchVerified(ctx, cacheRoot, r, p, c.Fetcher)
+			} else {
+				_, err = cache.Ensure(ctx, cacheRoot, r, p, c.Fetcher)
+			}
 			return err
 		})
 		if err != nil {
@@ -435,7 +443,7 @@ func (c Runner) publish(ctx context.Context, args []string) error {
 		return err
 	}
 	_, _ = fmt.Fprintln(c.progressOutput(), "Checking public sources and site")
-	if err := c.check(ctx); err != nil {
+	if err := c.check(ctx, true); err != nil {
 		return err
 	}
 	if err := site.RenderReadme(c.root()); err != nil {

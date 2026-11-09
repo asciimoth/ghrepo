@@ -31,7 +31,7 @@ func (f *countingFetcher) Fetch(ctx context.Context, raw string, sources, redire
 	return f.base.Fetch(ctx, raw, sources, redirects)
 }
 
-func TestCheckFetchesEachSourceOnce(t *testing.T) {
+func TestCheckUsesVerifiedCacheAndCanRefreshSources(t *testing.T) {
 	runner, _ := prepareFlow(t)
 	if err := runner.Run(context.Background(), []string{"rebuild"}); err != nil {
 		t.Fatal(err)
@@ -43,8 +43,29 @@ func TestCheckFetchesEachSourceOnce(t *testing.T) {
 	if err := runner.Run(context.Background(), []string{"check"}); err != nil {
 		t.Fatal(err)
 	}
+	if fetcher.calls != 0 {
+		t.Fatalf("cached check made %d source fetches", fetcher.calls)
+	}
+	if progress.Len() != 0 {
+		t.Fatalf("cached check reported downloads: %s", progress.String())
+	}
 	_, manifest, err := runner.load()
 	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, cacheRoot := runner.paths()
+	if err := os.WriteFile(filepath.Join(cacheRoot, "sha256", manifest.Packages[0].SHA256), []byte("bad"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(context.Background(), []string{"check"}); err != nil {
+		t.Fatal(err)
+	}
+	if fetcher.calls != 1 {
+		t.Fatalf("invalid cache entry caused %d source fetches, want 1", fetcher.calls)
+	}
+	fetcher.calls = 0
+	progress.Reset()
+	if err := runner.Run(context.Background(), []string{"check", "--refresh-sources"}); err != nil {
 		t.Fatal(err)
 	}
 	if fetcher.calls != len(manifest.Packages) {
@@ -346,7 +367,10 @@ func TestCheckRejectsMissingSourceAndOversizeSite(t *testing.T) {
 	}
 	missing := m.Packages[0].URL
 	delete(runner.Fetcher.(fixtureFetcher).data, missing)
-	if err := runner.Run(ctx, []string{"check"}); err == nil {
+	if err := runner.Run(ctx, []string{"check"}); err != nil {
+		t.Fatalf("cached check required a public source: %v", err)
+	}
+	if err := runner.Run(ctx, []string{"check", "--refresh-sources"}); err == nil {
 		t.Fatal("check accepted missing source with a cached copy")
 	}
 	runner.Fetcher.(fixtureFetcher).data[missing] = mustRead(t, "../contract/testdata/packages/hello_1.2.0-1_amd64.deb")

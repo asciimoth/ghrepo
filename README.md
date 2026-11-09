@@ -147,18 +147,19 @@ cache, metadata, and Git operations use the selected repository directory.
 These commands change or check local repository data. Run `ghrepo publish` when
 you are ready to deploy changes.
 
-| Command                          | Purpose                                                                     |
-| -------------------------------- | --------------------------------------------------------------------------- |
-| `ghrepo add URL`                 | Verify and add a DEB or RPM package.                                        |
-| `ghrepo sync`                    | Download and verify packages in the manifest.                               |
-| `ghrepo update`                  | Add new versions from upstream GitHub Releases.                             |
-| `ghrepo source set SELECTOR URL` | Change a source URL after checking the stored size and SHA-256.             |
-| `ghrepo replace SELECTOR URL`    | Replace bytes for the same package identity and retain the old served path. |
-| `ghrepo remove SELECTOR`         | Mark a package as retained.                                                 |
-| `ghrepo prune`                   | Preview retained paths eligible for removal.                                |
-| `ghrepo prune --apply`           | Remove eligible retained paths from the manifest.                           |
-| `ghrepo rebuild`                 | Build, sign, and verify APT and RPM indexes.                                |
-| `ghrepo check`                   | Check source URLs, signatures, package bytes, and rendered site size.       |
+| Command                          | Purpose                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------ |
+| `ghrepo add URL`                 | Verify and add a DEB or RPM package.                                           |
+| `ghrepo sync`                    | Download and verify packages in the manifest.                                  |
+| `ghrepo update`                  | Add new versions from upstream GitHub Releases.                                |
+| `ghrepo source set SELECTOR URL` | Change a source URL after checking the stored size and SHA-256.                |
+| `ghrepo replace SELECTOR URL`    | Replace bytes for the same package identity and retain the old served path.    |
+| `ghrepo remove SELECTOR`         | Mark a package as retained.                                                    |
+| `ghrepo prune`                   | Preview retained paths eligible for removal.                                   |
+| `ghrepo prune --apply`           | Remove eligible retained paths from the manifest.                              |
+| `ghrepo rebuild`                 | Build, sign, and verify APT and RPM indexes.                                   |
+| `ghrepo check`                   | Check cached packages, signatures, and site size; fetch invalid cache entries. |
+| `ghrepo check --refresh-sources` | Download and verify each source URL as well as checking the repository.        |
 
 A selector has the form `FORMAT/NAME/ARCHITECTURE/VERSION`. For example:
 
@@ -214,6 +215,11 @@ Two commands perform extra checks during a preview:
 workflow, signed metadata, and the rendered README. It reports each stage and
 public source check on standard error. Long downloads report progress every 15
 seconds.
+
+`check` verifies the SHA-256 and size of each cached package before it uses it.
+It downloads a package if its cache entry is missing or invalid. Use
+`check --refresh-sources` to check that every public source still serves the
+manifest bytes. `publish` always performs this source check.
 
 `rebuild` replaces metadata as one recoverable transaction. The ignored
 `.ghrepo-transaction/` directory records interrupted swaps; the next `rebuild`
