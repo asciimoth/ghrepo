@@ -88,41 +88,47 @@ func (c Runner) prune(args []string) error {
 	if err != nil {
 		return err
 	}
-	protected, err := c.protectedPackagePaths()
+	next, err := c.pruneManifest(m, r, c.output())
 	if err != nil {
 		return err
 	}
+	if *apply && !c.dryRun && len(next.Packages) != len(m.Packages) {
+		return c.save(next, r)
+	}
+	return nil
+}
+
+// pruneManifest checks existing indexes before any files are removed. A path
+// still in the previous index can become eligible on a later rebuild.
+func (c Runner) pruneManifest(m contract.Manifest, r contract.Repository, out io.Writer) (contract.Manifest, error) {
+	protected, err := c.protectedPackagePaths()
+	if err != nil {
+		return m, err
+	}
 	kept := make([]contract.Package, 0, len(m.Packages))
-	changed := false
 	for _, p := range m.Packages {
 		eligible := false
 		if p.State == "retained" {
 			retained, _ := time.Parse(time.RFC3339, p.RetainedAt)
 			eligible = !c.now().Before(retained.AddDate(0, 0, r.Site.RetentionDays)) && !protected[p.Path]
 			if eligible {
-				inIndex, e := c.indexReferences(p)
-				if e != nil {
-					return e
+				inIndex, err := c.indexReferences(p)
+				if err != nil {
+					return m, err
 				}
 				eligible = !inIndex
 			}
 		}
 		if eligible {
-			if _, err := fmt.Fprintf(c.output(), "eligible %s\n", p.Path); err != nil {
-				return err
+			if _, err := fmt.Fprintf(out, "eligible %s\n", p.Path); err != nil {
+				return m, err
 			}
-			if *apply && !c.dryRun {
-				changed = true
-				continue
-			}
+			continue
 		}
 		kept = append(kept, p)
 	}
-	if changed {
-		m.Packages = kept
-		return c.save(m, r)
-	}
-	return nil
+	m.Packages = kept
+	return m, nil
 }
 
 func (c Runner) protectedPackagePaths() (map[string]bool, error) {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -78,11 +79,12 @@ func (c Runner) fetchPackages(ctx context.Context, root string, r contract.Repos
 func (c Runner) transaction() string { return filepath.Join(c.root(), ".ghrepo-transaction") }
 
 type transactionRecord struct {
-	HadDeb bool `json:"had_deb"`
-	HadRPM bool `json:"had_rpm"`
+	HadDeb      bool `json:"had_deb"`
+	HadRPM      bool `json:"had_rpm"`
+	HadManifest bool `json:"had_manifest,omitempty"`
 }
 
-// recoverTransaction restores the previous complete pair if a swap was interrupted.
+// recoverTransaction restores the previous metadata and manifest after an interrupted swap.
 func (c Runner) recoverTransaction() error {
 	dir := c.transaction()
 	data, err := os.ReadFile(filepath.Join(dir, "pending.json"))
@@ -102,7 +104,10 @@ func (c Runner) recoverTransaction() error {
 	for _, item := range []struct {
 		name string
 		had  bool
-	}{{"deb", rec.HadDeb}, {"rpm", rec.HadRPM}} {
+	}{{"deb", rec.HadDeb}, {"rpm", rec.HadRPM}, {"packages.yaml", true}} {
+		if item.name == "packages.yaml" && !rec.HadManifest {
+			continue
+		}
 		target := filepath.Join(c.root(), item.name)
 		backup := filepath.Join(dir, "old-"+item.name)
 		if _, err := os.Stat(backup); err == nil {
@@ -141,6 +146,15 @@ func (c Runner) rebuild(ctx context.Context) error {
 	}
 	if local.GPG.KeyID == "" {
 		return errors.New("signing key is not configured")
+	}
+	retained := retainOlderVersions(&m, c.now())
+	var report bytes.Buffer
+	for _, path := range retained {
+		fmt.Fprintf(&report, "retained older version %s\n", path)
+	}
+	m, err = c.pruneManifest(m, r, &report)
+	if err != nil {
+		return err
 	}
 	_, _, cacheRoot := c.paths()
 	if _, err := cache.FetchAll(ctx, cacheRoot, r, m.Packages, c.Fetcher, nil, nil); err != nil {
@@ -189,7 +203,10 @@ func (c Runner) rebuild(ctx context.Context) error {
 	if err := rpm.Verify(filepath.Join(dir, "new-rpm"), key, packages, r, m); err != nil {
 		return err
 	}
-	rec := transactionRecord{}
+	if err := contract.WriteManifest(filepath.Join(dir, "new-packages.yaml"), m, r); err != nil {
+		return err
+	}
+	rec := transactionRecord{HadManifest: true}
 	for _, item := range []struct {
 		name string
 		had  *bool
@@ -209,7 +226,7 @@ func (c Runner) rebuild(ctx context.Context) error {
 		return err
 	}
 	recorded = true
-	for _, name := range []string{"deb", "rpm"} {
+	for _, name := range []string{"deb", "rpm", "packages.yaml"} {
 		target := filepath.Join(c.root(), name)
 		if _, err := os.Lstat(target); err == nil {
 			if err := os.Rename(target, filepath.Join(dir, "old-"+name)); err != nil {
@@ -226,7 +243,11 @@ func (c Runner) rebuild(ctx context.Context) error {
 		_ = c.recoverTransaction()
 		return err
 	}
-	return os.RemoveAll(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	_, err = io.Copy(c.output(), &report)
+	return err
 }
 
 var oldRPMName = regexp.MustCompile(`^[a-f0-9]{64}-(primary|filelists|other)\.xml\.gz$`)

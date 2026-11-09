@@ -175,6 +175,31 @@ ghrepo remove deb/hello/amd64/1.2.0-1
 `prune` removes only retained paths whose retention period has passed and which
 have no signed index or rollback reference.
 
+### Remove old versions automatically
+
+`ghrepo rebuild` keeps the newest active version for each package name, format,
+and architecture. `ghrepo publish` runs this step too. Version order follows DEB
+or RPM rules, including epochs and package revisions; it does not depend on the
+order in which you add packages. Versions that compare equal stay active.
+
+Older versions become `retained` and leave the new indexes and packages page.
+Their download paths remain available for at least `site.retention_days`
+(minimum 30 days). Later rebuilds remove expired retained entries when no
+existing index or rollback reference needs them. A protected entry can require
+another rebuild after its index reference expires. Local cache files and GitHub
+Release assets are not deleted.
+
+`add` and `update` leave cleanup to the next rebuild or publish. To preview it:
+
+```sh
+ghrepo rebuild --dry-run
+# Or preview the full publish operation:
+ghrepo publish --dry-run
+```
+
+The selection does not resolve dependencies. A package that requires an exact
+older version must be updated before that version leaves the active indexes.
+
 ### Add comments and tags
 
 ```sh

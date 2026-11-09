@@ -42,7 +42,7 @@ var commandHelp = map[string]string{
 	"metadata set": "Usage: ghrepo metadata set [--comment TEXT] [--source-url URL] [--tags TAGS] [--dry-run] SELECTOR",
 	"remove":       "Usage: ghrepo remove [--dry-run] SELECTOR...",
 	"prune":        "Usage: ghrepo prune [--apply] [--dry-run]",
-	"rebuild":      "Usage: ghrepo rebuild [--dry-run]",
+	"rebuild":      "Usage: ghrepo rebuild [--dry-run]\n\nRetain older versions, prune expired entries, and build signed metadata.",
 	"check":        "Usage: ghrepo check [--refresh-sources] [--dry-run]",
 	"publish":      "Usage: ghrepo publish [--dry-run] [--message TEXT]",
 	"gc":           "Usage: ghrepo gc",

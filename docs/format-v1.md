@@ -162,6 +162,20 @@ repository root at `<base_url>/rpm/`. For a manifest path
 prepends `rpm/` before comparison. No leading slash or `../` is permitted.
 Retained entries must not appear in new indexes.
 
+Before generating indexes, `rebuild` retains older active versions within each
+`(format, name, architecture)` group. It compares DEB epoch, upstream version,
+and revision, or RPM epoch, version, and release, using the corresponding
+package version rules. All entries equal to the highest active version remain
+active. Already retained entries do not affect selection or have their retention
+timestamp reset. Dependency constraints do not affect selection. `add` and
+`update` do not perform this cleanup; `publish` runs `rebuild`.
+
+The same rebuild removes expired retained entries under the `prune` rules. It
+checks references in existing indexes before replacing them, so an entry can
+require a later rebuild after its last index reference expires. Cleanup changes
+the manifest and served artifact, not local cache files or owned GitHub Release
+assets. Dry runs perform cleanup only in the preview copy.
+
 ## Local settings: `.ghrepo.local.yaml`
 
 ```yaml
@@ -198,19 +212,18 @@ file in the same directory before replacement. The `cache` package uses the same
 manifest validator and SHA-256 verifier for cache hits and new downloads.
 `cache.Ensure` stores verified files under `local-cache/sha256/`.
 `cache.FetchVerified` checks the source again even if a valid cache file exists;
-source changes and site builds use this operation. Batch operations download
-up to four packages at a time. Each file is checked against its manifest size
-and SHA-256 before use. The default HTTP transport
-resolves source hosts and connects only to public addresses, including after
-redirects. Its injected client option is for local TLS tests. The
-`storage.Backend` has an offline in-memory implementation and a GitHub Releases
-adapter. The GitHub adapter uses numbered release buckets, uploads only
-SHA-256-named assets, and reads the public URL back before it returns. Its tests
-use local TLS servers. `ghrepo gc` reports unreferenced owned assets in the
-configured buckets; it preserves URLs in the current manifest and branch or tag
-tip manifests. It does not delete assets. Numbered buckets require mutable
-releases. Existing immutable assets can be verified, but new assets cannot be
-added to an immutable release.
+source changes and site builds use this operation. Batch operations download up
+to four packages at a time. Each file is checked against its manifest size and
+SHA-256 before use. The default HTTP transport resolves source hosts and
+connects only to public addresses, including after redirects. Its injected
+client option is for local TLS tests. The `storage.Backend` has an offline
+in-memory implementation and a GitHub Releases adapter. The GitHub adapter uses
+numbered release buckets, uploads only SHA-256-named assets, and reads the
+public URL back before it returns. Its tests use local TLS servers. `ghrepo gc`
+reports unreferenced owned assets in the configured buckets; it preserves URLs
+in the current manifest and branch or tag tip manifests. It does not delete
+assets. Numbered buckets require mutable releases. Existing immutable assets can
+be verified, but new assets cannot be added to an immutable release.
 
 ## Signed output and support limits
 
@@ -366,13 +379,14 @@ only read local files and do not use the network.
 
 ## Local publishing transaction
 
-`rebuild` reads one validated manifest snapshot, verifies cached package bytes,
-creates both signed metadata trees in `.ghrepo-transaction/`, and verifies them
-with the committed public key. It copies checksum-named RPM metadata from the
-prior tree for client retention. A `pending.json` record precedes the two
-directory renames. The next `rebuild` or `check` restores both prior trees if
-the swap was interrupted. A completed swap has a `complete` marker and only
-needs transaction cleanup.
+`rebuild` reads one validated manifest snapshot, applies version cleanup,
+verifies cached package bytes, creates both signed metadata trees in
+`.ghrepo-transaction/`, and verifies them with the committed public key. It
+copies checksum-named RPM metadata from the prior tree for client retention. A
+`pending.json` record precedes the two metadata tree swaps and the manifest
+swap. The next `rebuild` or `check` restores both prior trees and the prior
+manifest if the swap was interrupted. A completed swap has a `complete` marker
+and only needs transaction cleanup.
 
 `check` fetches each manifest source again, verifies the APT and RPM signatures
 and index links, and builds a temporary site to check the exact artifact size.
