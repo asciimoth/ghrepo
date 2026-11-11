@@ -20,6 +20,8 @@ import (
 	"github.com/asciimoth/ghrepo/apt"
 	"github.com/asciimoth/ghrepo/cache"
 	"github.com/asciimoth/ghrepo/contract"
+	"github.com/asciimoth/ghrepo/internal/parallel"
+	"github.com/asciimoth/ghrepo/internal/progress"
 	"github.com/asciimoth/ghrepo/rpm"
 )
 
@@ -38,6 +40,8 @@ func BuildFromVerified(ctx context.Context, checkout, output, verifiedRoot strin
 }
 
 func build(ctx context.Context, checkout, output string, fetcher cache.Fetcher, verifiedRoot string) error {
+	ctx, task := progress.Start(ctx, "Build site", 0)
+	defer task.End()
 	r, err := contract.ReadRepository(filepath.Join(checkout, "ghrepo.yaml"))
 	if err != nil {
 		return err
@@ -73,10 +77,12 @@ func build(ctx context.Context, checkout, output string, fetcher cache.Fetcher, 
 			return err
 		}
 	}
-	for index, p := range m.Packages {
+	if err := progress.Batch(ctx, "Stage site packages", len(m.Packages), parallel.LocalWorkers(), func(i int) string { return m.Packages[i].Path }, func(ctx context.Context, index int) error {
+		p := m.Packages[index]
+		var err error
 		name := filepath.Join(downloads, "sha256", p.SHA256)
 		if verifiedRoot != "" {
-			err = cache.VerifyFile(name, p)
+			err = cache.VerifyFileContext(ctx, name, p)
 		} else {
 			name = names[index]
 		}
@@ -86,17 +92,22 @@ func build(ctx context.Context, checkout, output string, fetcher cache.Fetcher, 
 		if err := copyRegular(name, filepath.Join(stage, filepath.FromSlash(p.Path))); err != nil {
 			return err
 		}
-		if err := cache.VerifyFile(filepath.Join(stage, filepath.FromSlash(p.Path)), p); err != nil {
+		if err := cache.VerifyFileContext(ctx, filepath.Join(stage, filepath.FromSlash(p.Path)), p); err != nil {
 			return fmt.Errorf("staged package %s: %w", p.Path, err)
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	key := filepath.Join(stage, "KEY.gpg")
-	if err := apt.Verify(filepath.Join(stage, "deb"), key, r, m); err != nil {
+	if err := apt.VerifyContext(ctx, filepath.Join(stage, "deb"), key, r, m); err != nil {
 		return fmt.Errorf("APT metadata: %w", err)
 	}
-	if err := rpm.Verify(filepath.Join(stage, "rpm"), key, stage, r, m); err != nil {
+	if err := rpm.VerifyContext(ctx, filepath.Join(stage, "rpm"), key, stage, r, m); err != nil {
 		return fmt.Errorf("RPM metadata: %w", err)
 	}
+	_, renderTask := progress.Start(ctx, "Render and check site", 0)
+	defer renderTask.End()
 	if err := render(checkout, stage, r, m); err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ package rpm
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,6 +24,8 @@ import (
 	"github.com/asciimoth/ghrepo/cache"
 	"github.com/asciimoth/ghrepo/contract"
 	"github.com/asciimoth/ghrepo/inspect"
+	"github.com/asciimoth/ghrepo/internal/parallel"
+	"github.com/asciimoth/ghrepo/internal/progress"
 	rpmutils "github.com/sassoftware/go-rpmutils"
 )
 
@@ -200,6 +203,13 @@ func Build(out, cacheRoot string, r contract.Repository, m contract.Manifest, lo
 
 // BuildWithKeyRoot resolves trusted package key paths from the checkout root.
 func BuildWithKeyRoot(out, cacheRoot, keyRoot string, r contract.Repository, m contract.Manifest, local contract.Local) (buildErr error) {
+	return BuildWithKeyRootContext(context.Background(), out, cacheRoot, keyRoot, r, m, local)
+}
+
+// BuildWithKeyRootContext builds RPM metadata with cancellation and progress reporting.
+func BuildWithKeyRootContext(ctx context.Context, out, cacheRoot, keyRoot string, r contract.Repository, m contract.Manifest, local contract.Local) (buildErr error) {
+	ctx, task := progress.Start(ctx, "Build RPM metadata", 0)
+	defer task.End()
 	if err := m.Validate(r); err != nil {
 		return err
 	}
@@ -224,9 +234,13 @@ func BuildWithKeyRoot(out, cacheRoot, keyRoot string, r contract.Repository, m c
 	pdoc := primary{XMLNS: commonNS, Packages: len(entries)}
 	fdoc := filelists{XMLNS: fileNS, Packages: len(entries)}
 	odoc := other{XMLNS: otherNS, Packages: len(entries)}
-	for _, p := range entries {
+	pdoc.Entries = make([]primaryPackage, len(entries))
+	fdoc.Entries = make([]filePackage, len(entries))
+	odoc.Entries = make([]otherPackage, len(entries))
+	if err := progress.Batch(ctx, "Inspect RPM packages", len(entries), parallel.LocalWorkers(), func(i int) string { return entries[i].Path }, func(ctx context.Context, index int) error {
+		p := entries[index]
 		name := filepath.Join(cacheRoot, "sha256", p.SHA256)
-		if err := cache.VerifyFile(name, p); err != nil {
+		if err := cache.VerifyFileContext(ctx, name, p); err != nil {
 			return fmt.Errorf("package %s: %w", p.Path, err)
 		}
 		meta, n, digest, err := inspect.File(name, r.Downloads.MaxBytes)
@@ -291,9 +305,12 @@ func BuildWithKeyRoot(out, cacheRoot, keyRoot string, r contract.Repository, m c
 			}
 			fileEntries = append(fileEntries, item)
 		}
-		pdoc.Entries = append(pdoc.Entries, primaryPackage{Type: "rpm", Name: p.Identity.Name, Arch: p.Identity.Architecture, Version: v, Checksum: checksum{"sha256", p.SHA256}, Summary: meta.Fields["Summary"], Description: meta.Fields["Description"], URL: meta.Fields["URL"], Time: timestamp{0, 0}, Size: size{p.Size, installed, archive}, Location: location{strings.TrimPrefix(p.Path, "rpm/")}, Format: format{XMLNS: rpmNS, License: meta.Fields["License"], Requires: requires, Provides: provides, Conflicts: conflicts, Obsoletes: obsoletes}})
-		fdoc.Entries = append(fdoc.Entries, filePackage{PkgID: p.SHA256, Name: p.Identity.Name, Arch: p.Identity.Architecture, Version: v, Files: fileEntries})
-		odoc.Entries = append(odoc.Entries, otherPackage{p.SHA256, p.Identity.Name, p.Identity.Architecture, v})
+		pdoc.Entries[index] = primaryPackage{Type: "rpm", Name: p.Identity.Name, Arch: p.Identity.Architecture, Version: v, Checksum: checksum{"sha256", p.SHA256}, Summary: meta.Fields["Summary"], Description: meta.Fields["Description"], URL: meta.Fields["URL"], Time: timestamp{0, 0}, Size: size{p.Size, installed, archive}, Location: location{strings.TrimPrefix(p.Path, "rpm/")}, Format: format{XMLNS: rpmNS, License: meta.Fields["License"], Requires: requires, Provides: provides, Conflicts: conflicts, Obsoletes: obsoletes}}
+		fdoc.Entries[index] = filePackage{PkgID: p.SHA256, Name: p.Identity.Name, Arch: p.Identity.Architecture, Version: v, Files: fileEntries}
+		odoc.Entries[index] = otherPackage{p.SHA256, p.Identity.Name, p.Identity.Architecture, v}
+		return nil
+	}); err != nil {
+		return err
 	}
 	docs := []struct {
 		kind  string
@@ -327,11 +344,11 @@ func BuildWithKeyRoot(out, cacheRoot, keyRoot string, r contract.Repository, m c
 	if local.GPG.Keyring != "" {
 		args = append([]string{"--no-default-keyring", "--keyring", local.GPG.Keyring}, args...)
 	}
-	cmd := exec.Command("gpg", args...)
+	cmd := exec.CommandContext(ctx, "gpg", args...)
 	if local.GPG.Home != "" {
 		cmd.Env = append(os.Environ(), "GNUPGHOME="+local.GPG.Home)
 	}
-	if err := cmd.Run(); err != nil {
+	if err := progress.Run(ctx, cmd); err != nil {
 		return errors.New("RPM metadata signing failed")
 	}
 	return nil
@@ -468,6 +485,13 @@ func signatureUsesSupportedAlgorithm(sig *rpmutils.Signature) bool {
 // Verify checks the detached signature, all metadata links, and package bytes.
 // packageRoot is the site root containing the paths in the manifest.
 func Verify(dir, publicKey, packageRoot string, r contract.Repository, m contract.Manifest) error {
+	return VerifyContext(context.Background(), dir, publicKey, packageRoot, r, m)
+}
+
+// VerifyContext verifies RPM metadata and packages with cancellation and progress reporting.
+func VerifyContext(ctx context.Context, dir, publicKey, packageRoot string, r contract.Repository, m contract.Manifest) error {
+	ctx, task := progress.Start(ctx, "Verify RPM metadata", 0)
+	defer task.End()
 	if err := m.Validate(r); err != nil {
 		return err
 	}
@@ -477,8 +501,8 @@ func Verify(dir, publicKey, packageRoot string, r contract.Repository, m contrac
 		return err
 	}
 	repopath := filepath.Join(dir, "repodata", "repomd.xml")
-	cmd := exec.Command("gpgv", "--status-fd", "1", "--keyring", publicKey, repopath+".asc", repopath)
-	status, err := cmd.CombinedOutput()
+	cmd := exec.CommandContext(ctx, "gpgv", "--status-fd", "1", "--keyring", publicKey, repopath+".asc", repopath)
+	status, err := progress.CombinedOutput(ctx, cmd)
 	if err != nil {
 		return fmt.Errorf("RPM repomd signature verification failed: %w: %s", err, strings.TrimSpace(string(status)))
 	}
@@ -562,9 +586,12 @@ func Verify(dir, publicKey, packageRoot string, r contract.Repository, m contrac
 			return fmt.Errorf("RPM primary package mismatch: %s", e.Location.Href)
 		}
 		ids[p.Path] = true
-		if packageRoot != "" {
+	}
+	if packageRoot != "" {
+		if err := progress.Batch(ctx, "Verify RPM packages", len(expected), parallel.LocalWorkers(), func(i int) string { return expected[i].Path }, func(ctx context.Context, index int) error {
+			p := expected[index]
 			name := filepath.Join(packageRoot, filepath.FromSlash(p.Path))
-			if err := cache.VerifyFile(name, p); err != nil {
+			if err := cache.VerifyFileContext(ctx, name, p); err != nil {
 				return err
 			}
 			keys := make([]string, len(r.RPM.TrustedKeyPaths))
@@ -574,6 +601,9 @@ func Verify(dir, publicKey, packageRoot string, r contract.Repository, m contrac
 			if err := VerifyPackageSignature(name, keys, r.RPM.PackageSignature); err != nil {
 				return err
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 	for _, kind := range []string{"filelists", "other"} {

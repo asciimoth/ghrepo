@@ -163,7 +163,21 @@ you are ready to deploy changes.
 | `ghrepo check --refresh-sources` | Download and verify each source URL as well as checking the repository.        |
 
 `sync`, `rebuild`, `check`, and `site-build` download up to four packages at a
-time. Cached packages are reused by `sync`, `rebuild`, and normal `check`.
+time. Cached packages are reused by `sync`, `rebuild`, and normal `check`. Local
+cache checks, package inspection, signature checks, and package copies use 8 to
+32 workers, based on the available Go CPUs. Metadata keeps its sorted package
+order. A failed batch stops pending work and waits for running workers before
+temporary files are removed.
+
+Run a command under [zpg](https://github.com/asciimoth/zpg) to display its task
+tree:
+
+```sh
+zpg ghrepo publish
+zpg ghrepo rebuild
+zpg --test --test-output progress.log ghrepo check --refresh-sources
+```
+
 To test a rebuild with fresh downloads, run `ghrepo cache clean` before
 `ghrepo rebuild`. Use `ghrepo cache clean --dry-run` to preview the removal.
 

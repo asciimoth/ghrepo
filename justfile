@@ -1,9 +1,9 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
-set positional-arguments := true
-set dotenv-load := true
+set positional-arguments
+set dotenv-load
 
 # Run all project checks.
-check: tidy typos fmt lint vet test test-flake test-e2e fuzz
+check: tidy typos fmt lint vet test test-progress test-flake test-e2e fuzz
 
 # Update the Go module files.
 tidy:
@@ -33,6 +33,19 @@ vet:
 # Run all tests with the race detector and coverage measurement.
 test:
     go test -race -cover ./...
+
+# Validate command progress packets with zpg (available in nix develop).
+test-progress:
+    GHREPO_REQUIRE_ZPG=1 go test -race -count=1 -v ./cmd -run '^TestZPGFlows$'
+
+# Show real offline package work in zpg's live progress tree.
+demo-progress:
+    @command -v zpg >/dev/null || { printf 'zpg is required; run nix develop first\n' >&2; exit 1; }
+    @demo_dir="$(mktemp -d)"; trap 'rm -rf "$demo_dir"' EXIT; \
+      go test -c -o "$demo_dir/ghrepo-progress-demo" ./cmd; \
+      (cd cmd && GHREPO_PROGRESS_DEMO=1 zpg \
+        --name 'ghrepo progress demo' "$demo_dir/ghrepo-progress-demo" \
+        -test.run '^TestProgressDemo$' -test.v)
 
 # Build the installable Nix package and check its dependency hash.
 test-flake:

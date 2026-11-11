@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/asciimoth/ghrepo/contract"
+	"github.com/asciimoth/ghrepo/internal/progress"
 )
 
 // Fetcher opens a public source and returns its body. It must enforce URL and
@@ -240,6 +241,13 @@ func fetchOnce(ctx context.Context, client *http.Client, raw string) (io.ReadClo
 
 // VerifyFile checks a regular file against the manifest entry.
 func VerifyFile(name string, p contract.Package) error {
+	return VerifyFileContext(context.Background(), name, p)
+}
+
+// VerifyFileContext checks cached bytes with cancellation and byte progress.
+func VerifyFileContext(ctx context.Context, name string, p contract.Package) error {
+	ctx, task := progress.Start(ctx, "Verify bytes", uint64(max(0, p.Size)))
+	defer task.End()
 	info, err := os.Lstat(name)
 	if err != nil {
 		return err
@@ -256,8 +264,8 @@ func VerifyFile(name string, p contract.Package) error {
 	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
 		return errors.New("cached package changed while opening")
 	}
-	if err := verifyReader(f, io.Discard, p); err != nil {
-		return errors.New("cached package has invalid SHA-256 or size")
+	if err := verifyReader(progress.Reader(ctx, f, task), io.Discard, p); err != nil {
+		return fmt.Errorf("cached package has invalid SHA-256 or size: %w", err)
 	}
 	return nil
 }
@@ -295,13 +303,15 @@ func ensure(ctx context.Context, root string, r contract.Repository, p contract.
 	dir := filepath.Join(root, "sha256")
 	name := filepath.Join(dir, p.SHA256)
 	if !force {
-		if err := VerifyFile(name, p); err == nil {
+		if err := VerifyFileContext(ctx, name, p); err == nil {
 			return name, nil
 		}
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}
+	ctx, task := progress.Start(ctx, "Download bytes", uint64(p.Size))
+	defer task.End()
 	body, err := fetcher.Fetch(ctx, p.URL, r.Downloads.SourceHosts, r.Downloads.RedirectHosts)
 	if err != nil {
 		var diagnostic *downloadError
@@ -326,7 +336,7 @@ func ensure(ctx context.Context, root string, r contract.Repository, p contract.
 		_ = f.Close()
 		return "", err
 	}
-	if err := verifyReader(body, f, p); err != nil {
+	if err := verifyReader(progress.Reader(ctx, body, task), f, p); err != nil {
 		_ = f.Close()
 		return "", fmt.Errorf("downloaded package: %w", err)
 	}

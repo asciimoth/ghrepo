@@ -16,6 +16,7 @@ import (
 	"github.com/asciimoth/ghrepo/cache"
 	"github.com/asciimoth/ghrepo/contract"
 	"github.com/asciimoth/ghrepo/inspect"
+	"github.com/asciimoth/ghrepo/internal/progress"
 	"github.com/asciimoth/ghrepo/rpm"
 	"github.com/asciimoth/ghrepo/storage"
 )
@@ -168,7 +169,7 @@ func (c Runner) uploadOne(ctx context.Context, file string, sign bool, g *storag
 		}
 		defer func() { _ = os.RemoveAll(dir) }()
 		source = filepath.Join(dir, "signed.rpm")
-		if err := rpm.SignCopy(file, source, local, keys); err != nil {
+		if err := rpm.SignCopyContext(ctx, file, source, local, keys); err != nil {
 			return err
 		}
 	}
@@ -339,24 +340,24 @@ func (c Runner) gc(ctx context.Context, args []string) error {
 		if ref == "" {
 			continue
 		}
-		paths := exec.Command("git", "ls-tree", "--name-only", ref, "--", "packages.yaml")
+		paths := exec.CommandContext(ctx, "git", "ls-tree", "--name-only", ref, "--", "packages.yaml")
 		paths.Dir = c.root()
-		listed, e := paths.Output()
+		listed, e := progress.Output(ctx, paths)
 		if e != nil {
 			return errors.New("cannot inspect rollback reference")
 		}
 		if strings.TrimSpace(string(listed)) == "" {
 			continue
 		}
-		command := exec.Command("git", "show", ref+":packages.yaml")
+		command := exec.CommandContext(ctx, "git", "show", ref+":packages.yaml")
 		command.Dir = c.root()
-		data, e := command.Output()
+		data, e := progress.Output(ctx, command)
 		if e != nil {
 			return errors.New("cannot read rollback manifest")
 		}
-		config := exec.Command("git", "show", ref+":ghrepo.yaml")
+		config := exec.CommandContext(ctx, "git", "show", ref+":ghrepo.yaml")
 		config.Dir = c.root()
-		configData, e := config.Output()
+		configData, e := progress.Output(ctx, config)
 		if e != nil {
 			return errors.New("cannot read rollback repository settings")
 		}

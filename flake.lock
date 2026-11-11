@@ -97,7 +97,8 @@
       "inputs": {
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
-        "pre-commit-hooks": "pre-commit-hooks"
+        "pre-commit-hooks": "pre-commit-hooks",
+        "zpg": "zpg"
       }
     },
     "systems": {
@@ -112,6 +113,22 @@
       "original": {
         "owner": "nix-systems",
         "repo": "default",
+        "type": "github"
+      }
+    },
+    "zpg": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794331820,
+        "narHash": "sha256-sPJ4+pNgDqmtWGBrZ+XVq9qVIY/Uw+kNj7UQUQgbHco=",
+        "owner": "asciimoth",
+        "repo": "zpg",
+        "rev": "621a746d5a14a5928aa7f3ca1ab89a5c55fe719c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "asciimoth",
+        "repo": "zpg",
         "type": "github"
       }
     }

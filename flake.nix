@@ -8,6 +8,10 @@
 {
   description = "Tool for hosting deb/rm repos on GH pages";
   inputs = {
+    zpg = {
+      url = "github:asciimoth/zpg";
+      flake = false;
+    };
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils = {
       url = "github:numtide/flake-utils";
@@ -23,6 +27,7 @@
     nixpkgs,
     flake-utils,
     pre-commit-hooks,
+    zpg,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (system: let
@@ -47,11 +52,31 @@
         ]
       );
 
+      # Use the source input to avoid zpg's development dependency on ghrepo.
+      zpgTool = pkgs.stdenvNoCC.mkDerivation {
+        pname = "zpg";
+        version = "unstable";
+        src = zpg;
+        nativeBuildInputs = [ pkgs.zig_0_17 ];
+        dontConfigure = true;
+        buildPhase = ''
+          runHook preBuild
+          export ZIG_GLOBAL_CACHE_DIR="$TMPDIR/zig-global-cache"
+          zig build -Doptimize=ReleaseSafe --cache-dir "$TMPDIR/zig-cache"
+          runHook postBuild
+        '';
+        installPhase = ''
+          runHook preInstall
+          install -Dm755 zig-out/bin/zpg "$out/bin/zpg"
+          runHook postInstall
+        '';
+      };
+
       ghrepo = pkgs.buildGoModule {
         pname = "ghrepo";
         version = "unstable";
         src = ./.;
-        vendorHash = "sha256-eLxLRvCh2ZeokRpFSEa3fmcK6llE2zIQYv/J3JLqXFc=";
+        vendorHash = "sha256-7ecsvD0UMbQaXVmHir5glWQ7IuAMP+fuPCd5yTaRSnE=";
         nativeBuildInputs = [ pkgs.makeWrapper ];
         # GPG agent sockets inside test repositories break dry-run copy tests
         # in the Nix sandbox. Run the Go suite outside the package build.
@@ -100,6 +125,7 @@
       devShells.default = pkgs.mkShell {
         inherit (checks.pre-commit-check) shellHook;
         buildInputs = with pkgs; [
+          zpgTool
           go_1_27
           golangci-lint
           gopls

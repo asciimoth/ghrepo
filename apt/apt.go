@@ -4,6 +4,7 @@ package apt
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -20,15 +21,28 @@ import (
 	"github.com/asciimoth/ghrepo/cache"
 	"github.com/asciimoth/ghrepo/contract"
 	"github.com/asciimoth/ghrepo/inspect"
+	"github.com/asciimoth/ghrepo/internal/parallel"
+	"github.com/asciimoth/ghrepo/internal/progress"
 )
 
 // Build writes a complete signed deb directory to a new output directory.
 // Package bytes are read from the verified local cache.
 func Build(out, cacheRoot string, r contract.Repository, m contract.Manifest, local contract.Local) error {
-	return buildAt(out, cacheRoot, r, m, local, time.Now().UTC())
+	return BuildContext(context.Background(), out, cacheRoot, r, m, local)
+}
+
+// BuildContext builds APT metadata with cancellation and progress reporting.
+func BuildContext(ctx context.Context, out, cacheRoot string, r contract.Repository, m contract.Manifest, local contract.Local) error {
+	return buildAtContext(ctx, out, cacheRoot, r, m, local, time.Now().UTC())
 }
 
 func buildAt(out, cacheRoot string, r contract.Repository, m contract.Manifest, local contract.Local, when time.Time) (buildErr error) {
+	return buildAtContext(context.Background(), out, cacheRoot, r, m, local, when)
+}
+
+func buildAtContext(ctx context.Context, out, cacheRoot string, r contract.Repository, m contract.Manifest, local contract.Local, when time.Time) (buildErr error) {
+	ctx, task := progress.Start(ctx, "Build APT metadata", 0)
+	defer task.End()
 	if err := m.Validate(r); err != nil {
 		return err
 	}
@@ -44,10 +58,12 @@ func buildAt(out, cacheRoot string, r contract.Repository, m contract.Manifest, 
 		}
 	}()
 	entries := active(m)
-	var plain bytes.Buffer
-	for _, p := range entries {
+	stanzas := make([]bytes.Buffer, len(entries))
+	if err := progress.Batch(ctx, "Inspect DEB packages", len(entries), parallel.LocalWorkers(), func(i int) string { return entries[i].Path }, func(ctx context.Context, index int) error {
+		p := entries[index]
+		plain := &stanzas[index]
 		name := filepath.Join(cacheRoot, "sha256", p.SHA256)
-		if err := cache.VerifyFile(name, p); err != nil {
+		if err := cache.VerifyFileContext(ctx, name, p); err != nil {
 			return fmt.Errorf("package %s: %w", p.Path, err)
 		}
 		meta, size, digest, err := inspect.File(name, r.Downloads.MaxBytes)
@@ -57,10 +73,17 @@ func buildAt(out, cacheRoot string, r contract.Repository, m contract.Manifest, 
 		if meta.Format != "deb" || meta.Identity != p.Identity || size != p.Size || digest != p.SHA256 {
 			return fmt.Errorf("package %s: inspected identity differs", p.Path)
 		}
-		if err := writeControl(&plain, meta.Fields); err != nil {
+		if err := writeControl(plain, meta.Fields); err != nil {
 			return err
 		}
-		fmt.Fprintf(&plain, "Filename: %s\nSize: %d\nSHA256: %s\n\n", strings.TrimPrefix(p.Path, "deb/"), p.Size, p.SHA256)
+		fmt.Fprintf(plain, "Filename: %s\nSize: %d\nSHA256: %s\n\n", strings.TrimPrefix(p.Path, "deb/"), p.Size, p.SHA256)
+		return nil
+	}); err != nil {
+		return err
+	}
+	var plain bytes.Buffer
+	for i := range stanzas {
+		plain.Write(stanzas[i].Bytes())
 	}
 	var zipped bytes.Buffer
 	zw := gzip.NewWriter(&zipped)
@@ -85,8 +108,8 @@ func buildAt(out, cacheRoot string, r contract.Repository, m contract.Manifest, 
 	if err := os.WriteFile(filepath.Join(out, "Release"), []byte(release), 0644); err != nil {
 		return err
 	}
-	cmd := gpg(local, "--batch", "--yes", "--local-user", local.GPG.KeyID, "--digest-algo", "SHA256", "--clearsign", "--output", filepath.Join(out, "InRelease"), filepath.Join(out, "Release"))
-	if err := cmd.Run(); err != nil {
+	cmd := gpg(ctx, local, "--batch", "--yes", "--local-user", local.GPG.KeyID, "--digest-algo", "SHA256", "--clearsign", "--output", filepath.Join(out, "InRelease"), filepath.Join(out, "Release"))
+	if err := progress.Run(ctx, cmd); err != nil {
 		return errors.New("APT Release signing failed")
 	}
 	return nil
@@ -145,11 +168,11 @@ func controlField(w io.Writer, key, value string) error {
 	return err
 }
 
-func gpg(local contract.Local, args ...string) *exec.Cmd {
+func gpg(ctx context.Context, local contract.Local, args ...string) *exec.Cmd {
 	if local.GPG.Keyring != "" {
 		args = append([]string{"--no-default-keyring", "--keyring", local.GPG.Keyring}, args...)
 	}
-	cmd := exec.Command("gpg", args...)
+	cmd := exec.CommandContext(ctx, "gpg", args...)
 	if local.GPG.Home != "" {
 		cmd.Env = append(os.Environ(), "GNUPGHOME="+local.GPG.Home)
 	}
@@ -170,6 +193,13 @@ func active(m contract.Manifest) []contract.Package {
 // Verify reads signed metadata without using the generation parser. The public
 // key file must be an exported OpenPGP keyring, such as KEY.gpg.
 func Verify(dir, publicKey string, r contract.Repository, m contract.Manifest) error {
+	return VerifyContext(context.Background(), dir, publicKey, r, m)
+}
+
+// VerifyContext verifies APT metadata with cancellation and progress reporting.
+func VerifyContext(ctx context.Context, dir, publicKey string, r contract.Repository, m contract.Manifest) error {
+	ctx, task := progress.Start(ctx, "Verify APT metadata", 0)
+	defer task.End()
 	if err := m.Validate(r); err != nil {
 		return err
 	}
@@ -187,8 +217,8 @@ func Verify(dir, publicKey string, r contract.Repository, m contract.Manifest) e
 	}
 	defer func() { _ = os.RemoveAll(verifiedDir) }()
 	verifiedPath := filepath.Join(verifiedDir, "Release")
-	cmd := exec.Command("gpgv", "--status-fd", "1", "--keyring", publicKey, "--output", verifiedPath, filepath.Join(dir, "InRelease"))
-	status, err := cmd.CombinedOutput()
+	cmd := exec.CommandContext(ctx, "gpgv", "--status-fd", "1", "--keyring", publicKey, "--output", verifiedPath, filepath.Join(dir, "InRelease"))
+	status, err := progress.CombinedOutput(ctx, cmd)
 	if err != nil {
 		return fmt.Errorf("APT Release signature verification failed: %w: %s", err, strings.TrimSpace(string(status)))
 	}

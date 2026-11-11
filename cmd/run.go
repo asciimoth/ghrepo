@@ -22,6 +22,8 @@ import (
 	"github.com/asciimoth/ghrepo/cache"
 	"github.com/asciimoth/ghrepo/contract"
 	"github.com/asciimoth/ghrepo/inspect"
+	"github.com/asciimoth/ghrepo/internal/parallel"
+	"github.com/asciimoth/ghrepo/internal/progress"
 	"github.com/asciimoth/ghrepo/site"
 )
 
@@ -33,6 +35,7 @@ type Runner struct {
 	Now          func() time.Time
 	GitHubAPIURL string
 	GitHubClient *http.Client
+	ctx          context.Context
 	dryRun       bool
 }
 
@@ -52,7 +55,7 @@ func (c Runner) paths() (string, string, string) {
 	d := c.root()
 	return filepath.Join(d, "ghrepo.yaml"), filepath.Join(d, "packages.yaml"), filepath.Join(d, "local-cache")
 }
-func (c Runner) Run(ctx context.Context, args []string) error {
+func (c Runner) Run(ctx context.Context, args []string) (runErr error) {
 	var err error
 	c, args, err = c.repositoryDir(args)
 	if err != nil {
@@ -70,6 +73,10 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|metadata set|remove|prune|rebuild|check|publish|gc|cache clean|site-build|readme-build")
 	}
+	ctx, finish := progress.Begin(ctx, "ghrepo "+args[0])
+	defer func() { finish(runErr) }()
+	c.ctx = ctx
+
 	switch args[0] {
 	case "init":
 		return c.init(ctx, args[1:])
@@ -331,7 +338,7 @@ func (c Runner) init(ctx context.Context, args []string) error {
 			*branch = "main"
 			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 				command := exec.CommandContext(ctx, "git", "-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD")
-				output, err := command.Output()
+				output, err := progress.Output(ctx, command)
 				if err != nil {
 					return errors.New("cannot determine current Git branch; set --branch")
 				}
@@ -382,8 +389,8 @@ func (c Runner) init(ctx context.Context, args []string) error {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); errors.Is(err, os.ErrNotExist) {
-		command := exec.Command("git", "init", "-b", r.Repository.Branch, dir)
-		if output, e := command.CombinedOutput(); e != nil {
+		command := exec.CommandContext(ctx, "git", "init", "-b", r.Repository.Branch, dir)
+		if output, e := progress.CombinedOutput(ctx, command); e != nil {
 			_ = output
 			return errors.New("git initialization failed")
 		}
@@ -458,11 +465,11 @@ func (c Runner) init(ctx context.Context, args []string) error {
 				args = append(args, "--no-default-keyring", "--keyring", configured.GPG.Keyring)
 			}
 			args = append(args, "--export", configured.GPG.KeyID)
-			command := exec.Command("gpg", args...)
+			command := exec.CommandContext(ctx, "gpg", args...)
 			if configured.GPG.Home != "" {
 				command.Env = append(os.Environ(), "GNUPGHOME="+configured.GPG.Home)
 			}
-			data, e := command.Output()
+			data, e := progress.Output(ctx, command)
 			if e != nil {
 				return errors.New("public-key export failed")
 			}
@@ -490,9 +497,9 @@ func (c Runner) init(ctx context.Context, args []string) error {
 			return err
 		}
 		if *createRemote {
-			origin := exec.Command("git", "remote", "get-url", "origin")
+			origin := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
 			origin.Dir = dir
-			current, e := origin.Output()
+			current, e := progress.Output(ctx, origin)
 			if e == nil && strings.TrimSpace(string(current)) != r.Repository.URL {
 				return errors.New("existing origin does not match repository URL")
 			}
@@ -506,9 +513,9 @@ func (c Runner) init(ctx context.Context, args []string) error {
 				return err
 			}
 			if e != nil {
-				command := exec.Command("git", "remote", "add", "origin", r.Repository.URL)
+				command := exec.CommandContext(ctx, "git", "remote", "add", "origin", r.Repository.URL)
 				command.Dir = dir
-				if err := command.Run(); err != nil {
+				if err := progress.Run(ctx, command); err != nil {
 					return errors.New("git origin setup failed")
 				}
 			}
@@ -577,7 +584,7 @@ func describeGPGKey(ctx context.Context, home, keyring, keyID string) string {
 	if home != "" {
 		command.Env = append(os.Environ(), "GNUPGHOME="+home)
 	}
-	data, err := command.Output()
+	data, err := progress.Output(ctx, command)
 	if err != nil {
 		return keyID
 	}
@@ -617,7 +624,7 @@ func defaultSigningKey(ctx context.Context, home, keyring string) (string, error
 	if home != "" {
 		command.Env = append(os.Environ(), "GNUPGHOME="+home)
 	}
-	data, err := command.Output()
+	data, err := progress.Output(ctx, command)
 	if errors.Is(err, exec.ErrNotFound) {
 		return "", nil
 	}
@@ -806,9 +813,13 @@ func addOne(ctx context.Context, raw, dir string, r contract.Repository, m *cont
 }
 
 func addOneChecked(ctx context.Context, raw, dir string, r contract.Repository, m *contract.Manifest, fetcher cache.Fetcher, replaceIndex int, now time.Time, check func(contract.Package) error) error {
+	ctx, task := progress.Start(ctx, "Add package", 0)
+	defer task.End()
 	if err := contract.ValidateSourceURL(raw, r.Downloads.SourceHosts); err != nil {
 		return err
 	}
+	_, download := progress.Start(ctx, "Download bytes", 0)
+	defer download.End()
 	body, err := fetcher.Fetch(ctx, raw, r.Downloads.SourceHosts, r.Downloads.RedirectHosts)
 	if err != nil {
 		return errors.New("source download failed")
@@ -821,8 +832,9 @@ func addOneChecked(ctx context.Context, raw, dir string, r contract.Repository, 
 	name := f.Name()
 	defer func() { _ = os.Remove(name) }()
 	hash := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(f, hash), io.LimitReader(body, r.Downloads.MaxBytes+1))
+	n, copyErr := io.Copy(io.MultiWriter(f, hash), io.LimitReader(progress.Reader(ctx, body, download), r.Downloads.MaxBytes+1))
 	closeErr := body.Close()
+	download.End()
 	if copyErr != nil || closeErr != nil || n == 0 || n > r.Downloads.MaxBytes {
 		_ = f.Close()
 		return errors.New("invalid or incomplete package download")
@@ -834,7 +846,9 @@ func addOneChecked(ctx context.Context, raw, dir string, r contract.Repository, 
 	if err := f.Close(); err != nil {
 		return err
 	}
+	_, inspection := progress.Start(ctx, "Inspect package", 0)
 	meta, size, digest, err := inspect.File(name, r.Downloads.MaxBytes)
+	inspection.End()
 	if err != nil {
 		return err
 	}
@@ -851,7 +865,7 @@ func addOneChecked(ctx context.Context, raw, dir string, r contract.Repository, 
 			return err
 		}
 	}
-	if err := cache.VerifyFile(name, p); err != nil {
+	if err := cache.VerifyFileContext(ctx, name, p); err != nil {
 		return err
 	}
 	if replaceIndex >= 0 {
@@ -907,8 +921,16 @@ func (c Runner) syncTracked(ctx context.Context, args []string) (map[string]bool
 	}
 	_, _, root := c.paths()
 	if c.dryRun {
-		for _, p := range m.Packages {
-			if cache.VerifyFile(filepath.Join(root, "sha256", p.SHA256), p) != nil {
+		missing := make([]bool, len(m.Packages))
+		if err := progress.Batch(ctx, "Check cache", len(m.Packages), parallel.LocalWorkers(), func(i int) string { return m.Packages[i].Path }, func(ctx context.Context, index int) error {
+			p := m.Packages[index]
+			missing[index] = cache.VerifyFileContext(ctx, filepath.Join(root, "sha256", p.SHA256), p) != nil
+			return ctx.Err()
+		}); err != nil {
+			return nil, err
+		}
+		for index, p := range m.Packages {
+			if missing[index] {
 				if err := c.preview("would download %s", p.URL); err != nil {
 					return nil, err
 				}
@@ -1052,4 +1074,12 @@ func workflowFor(r contract.Repository) string {
 		"    environment:\n      name: github-pages\n      url: ${{ steps.deployment.outputs.page_url }}\n" +
 		"    permissions:\n      pages: write\n      id-token: write\n" +
 		"    steps:\n      - id: deployment\n        uses: actions/deploy-pages@v4\n"
+}
+
+// context also supports internal callers that do not enter through Run.
+func (c Runner) context() context.Context {
+	if c.ctx != nil {
+		return c.ctx
+	}
+	return context.Background()
 }

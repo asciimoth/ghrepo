@@ -20,6 +20,8 @@ import (
 	"github.com/asciimoth/ghrepo/apt"
 	"github.com/asciimoth/ghrepo/cache"
 	"github.com/asciimoth/ghrepo/contract"
+	"github.com/asciimoth/ghrepo/internal/parallel"
+	"github.com/asciimoth/ghrepo/internal/progress"
 	"github.com/asciimoth/ghrepo/rpm"
 	"github.com/asciimoth/ghrepo/site"
 )
@@ -133,6 +135,9 @@ func (c Runner) local() (contract.Local, error) {
 }
 
 func (c Runner) rebuild(ctx context.Context) error {
+	ctx, task := progress.Start(ctx, "Rebuild repository", 0)
+	defer task.End()
+	c.ctx = ctx
 	if err := c.recoverTransaction(); err != nil {
 		return err
 	}
@@ -170,37 +175,29 @@ func (c Runner) rebuild(ctx context.Context) error {
 			_ = os.RemoveAll(dir)
 		}
 	}()
-	if err := apt.Build(filepath.Join(dir, "new-deb"), cacheRoot, r, m, local); err != nil {
+	if err := apt.BuildContext(ctx, filepath.Join(dir, "new-deb"), cacheRoot, r, m, local); err != nil {
 		return err
 	}
-	if err := rpm.BuildWithKeyRoot(filepath.Join(dir, "new-rpm"), cacheRoot, c.root(), r, m, local); err != nil {
+	if err := rpm.BuildWithKeyRootContext(ctx, filepath.Join(dir, "new-rpm"), cacheRoot, c.root(), r, m, local); err != nil {
 		return err
 	}
 	if err := c.retainRPM(filepath.Join(c.root(), "rpm", "repodata"), filepath.Join(dir, "new-rpm", "repodata"), r.Site.RetentionDays); err != nil {
 		return err
 	}
 	key := filepath.Join(c.root(), "KEY.gpg")
-	if err := apt.Verify(filepath.Join(dir, "new-deb"), key, r, m); err != nil {
+	if err := apt.VerifyContext(ctx, filepath.Join(dir, "new-deb"), key, r, m); err != nil {
 		return err
 	}
 	// RPM verification reads package files from the site root. Build a private
 	// regular-file tree from the verified cache for this check.
 	packages := filepath.Join(dir, "packages")
-	for _, p := range m.Packages {
-		if p.Format == "rpm" && p.State == "active" {
-			dst := filepath.Join(packages, filepath.FromSlash(p.Path))
-			if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-				return err
-			}
-			if err := copyPackage(filepath.Join(cacheRoot, "sha256", p.SHA256), dst); err != nil {
-				return err
-			}
-		}
+	if err := stageRPMPackages(ctx, cacheRoot, packages, m); err != nil {
+		return err
 	}
 	if err := c.stageTrustedKeys(r, packages); err != nil {
 		return err
 	}
-	if err := rpm.Verify(filepath.Join(dir, "new-rpm"), key, packages, r, m); err != nil {
+	if err := rpm.VerifyContext(ctx, filepath.Join(dir, "new-rpm"), key, packages, r, m); err != nil {
 		return err
 	}
 	if err := contract.WriteManifest(filepath.Join(dir, "new-packages.yaml"), m, r); err != nil {
@@ -393,6 +390,9 @@ func (c Runner) check(ctx context.Context, refreshSources bool) error {
 
 // freshSources contains paths downloaded and checked earlier in this run.
 func (c Runner) checkWithFreshSources(ctx context.Context, refreshSources bool, freshSources map[string]bool) error {
+	ctx, task := progress.Start(ctx, "Check repository", 0)
+	defer task.End()
+	c.ctx = ctx
 	if err := c.recoverTransaction(); err != nil {
 		return err
 	}
@@ -411,7 +411,7 @@ func (c Runner) checkWithFreshSources(ctx context.Context, refreshSources bool, 
 		return err
 	}
 	key := filepath.Join(c.root(), "KEY.gpg")
-	if err := apt.Verify(filepath.Join(c.root(), "deb"), key, r, m); err != nil {
+	if err := apt.VerifyContext(ctx, filepath.Join(c.root(), "deb"), key, r, m); err != nil {
 		return err
 	}
 	// Verify RPM indexed bytes against the cache in a temporary package tree.
@@ -420,21 +420,13 @@ func (c Runner) checkWithFreshSources(ctx context.Context, refreshSources bool, 
 		return err
 	}
 	defer func() { _ = os.RemoveAll(temp) }()
-	for _, p := range m.Packages {
-		if p.Format == "rpm" && p.State == "active" {
-			dst := filepath.Join(temp, filepath.FromSlash(p.Path))
-			if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-				return err
-			}
-			if err := copyPackage(filepath.Join(cacheRoot, "sha256", p.SHA256), dst); err != nil {
-				return err
-			}
-		}
+	if err := stageRPMPackages(ctx, cacheRoot, temp, m); err != nil {
+		return err
 	}
 	if err := c.stageTrustedKeys(r, temp); err != nil {
 		return err
 	}
-	if err := rpm.Verify(filepath.Join(c.root(), "rpm"), key, temp, r, m); err != nil {
+	if err := rpm.VerifyContext(ctx, filepath.Join(c.root(), "rpm"), key, temp, r, m); err != nil {
 		return err
 	}
 	// The site builder checks all links and the exact rendered size.
@@ -620,17 +612,17 @@ func copyPreviewRepository(root string) (string, error) {
 }
 
 func (c Runner) git(args ...string) error {
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(c.context(), "git", args...)
 	cmd.Dir = c.root()
-	if _, err := cmd.CombinedOutput(); err != nil {
+	if _, err := progress.CombinedOutput(c.context(), cmd); err != nil {
 		return fmt.Errorf("git %s failed: %w", args[0], err)
 	}
 	return nil
 }
 func (c Runner) gitOutput(args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(c.context(), "git", args...)
 	cmd.Dir = c.root()
-	return cmd.Output()
+	return progress.Output(c.context(), cmd)
 }
 
 func (c Runner) allowedGitPaths() ([]string, error) {
@@ -726,10 +718,10 @@ func (c Runner) verifyIndexAllowlist() error {
 	return nil
 }
 func (c Runner) gitWithIndex(index string, args ...string) ([]byte, error) {
-	command := exec.Command("git", args...)
+	command := exec.CommandContext(c.context(), "git", args...)
 	command.Dir = c.root()
 	command.Env = append(os.Environ(), "GIT_INDEX_FILE="+index)
-	return command.Output()
+	return progress.Output(c.context(), command)
 }
 
 // intendedChanges stages into a private copy of the index. The returned tree
@@ -786,4 +778,21 @@ func (c Runner) intendedChanges(paths []string) ([]string, string, error) {
 		return nil, "", err
 	}
 	return result, string(tree), nil
+}
+
+func stageRPMPackages(ctx context.Context, cacheRoot, root string, m contract.Manifest) error {
+	var packages []contract.Package
+	for _, p := range m.Packages {
+		if p.Format == "rpm" && p.State == "active" {
+			packages = append(packages, p)
+		}
+	}
+	return progress.Batch(ctx, "Stage RPM packages", len(packages), parallel.LocalWorkers(), func(i int) string { return packages[i].Path }, func(_ context.Context, index int) error {
+		p := packages[index]
+		dst := filepath.Join(root, filepath.FromSlash(p.Path))
+		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+			return err
+		}
+		return copyPackage(filepath.Join(cacheRoot, "sha256", p.SHA256), dst)
+	})
 }

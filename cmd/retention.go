@@ -18,6 +18,7 @@ import (
 
 	"github.com/asciimoth/ghrepo/cache"
 	"github.com/asciimoth/ghrepo/contract"
+	"github.com/asciimoth/ghrepo/internal/progress"
 	"github.com/asciimoth/ghrepo/rpm"
 )
 
@@ -147,15 +148,15 @@ func (c Runner) protectedPackagePaths() (map[string]bool, error) {
 		if ref == strings.TrimSpace(string(current)) {
 			continue
 		}
-		cmd := exec.Command("git", "show", ref+":packages.yaml")
+		cmd := exec.CommandContext(c.context(), "git", "show", ref+":packages.yaml")
 		cmd.Dir = c.root()
-		data, err := cmd.Output()
+		data, err := progress.Output(c.context(), cmd)
 		if err != nil {
 			continue
 		} // A reference can predate the manifest.
-		cmd = exec.Command("git", "show", ref+":ghrepo.yaml")
+		cmd = exec.CommandContext(c.context(), "git", "show", ref+":ghrepo.yaml")
 		cmd.Dir = c.root()
-		config, err := cmd.Output()
+		config, err := progress.Output(c.context(), cmd)
 		if err != nil {
 			return nil, errors.New("cannot read rollback repository settings")
 		}
@@ -246,9 +247,9 @@ func (c Runner) protectedRPMMetadata() (map[string]bool, error) {
 		if ref == strings.TrimSpace(string(current)) {
 			continue
 		}
-		cmd := exec.Command("git", "show", ref+":rpm/repodata/repomd.xml")
+		cmd := exec.CommandContext(c.context(), "git", "show", ref+":rpm/repodata/repomd.xml")
 		cmd.Dir = c.root()
-		data, err := cmd.Output()
+		data, err := progress.Output(c.context(), cmd)
 		if err != nil {
 			continue // A reference can predate RPM metadata.
 		}

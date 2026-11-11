@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/asciimoth/ghrepo/cmd"
 )
 
 func main() {
-	if err := (cmd.Runner{}).Run(context.Background(), os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := (cmd.Runner{}).Run(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "ghrepo:", err)
 		os.Exit(1)
 	}

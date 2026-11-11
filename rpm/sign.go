@@ -2,6 +2,7 @@ package rpm
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"encoding/binary"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"github.com/ProtonMail/go-crypto/openpgp/packet"
 	"github.com/asciimoth/ghrepo/contract"
 	"github.com/asciimoth/ghrepo/inspect"
+	"github.com/asciimoth/ghrepo/internal/progress"
 	rpmutils "github.com/sassoftware/go-rpmutils"
 )
 
@@ -20,6 +22,13 @@ import (
 // only to a new path. The caller must inspect and hash the final bytes before
 // adding the copy to the manifest.
 func SignCopy(source, destination string, local contract.Local, trustedKeys []string) error {
+	return SignCopyContext(context.Background(), source, destination, local, trustedKeys)
+}
+
+// SignCopyContext signs a copy with cancellation and progress reporting.
+func SignCopyContext(ctx context.Context, source, destination string, local contract.Local, trustedKeys []string) error {
+	ctx, task := progress.Start(ctx, "Sign RPM package", 0)
+	defer task.End()
 	if source == destination {
 		return errors.New("RPM signing requires a new output path")
 	}
@@ -52,11 +61,11 @@ func SignCopy(source, destination string, local contract.Local, trustedKeys []st
 	}
 	// gpg signs the general header and the general header plus payload. No
 	// private key material leaves the selected local keyring or signing agent.
-	headerSignature, e := signBytes(raw[span.Start:span.End], local)
+	headerSignature, e := signBytes(ctx, raw[span.Start:span.End], local)
 	if e != nil {
 		return e
 	}
-	payloadSignature, e := signBytes(raw[span.Start:], local)
+	payloadSignature, e := signBytes(ctx, raw[span.Start:], local)
 	if e != nil {
 		return e
 	}
@@ -152,7 +161,7 @@ func useEdDSASignatureTags(name string) error {
 	return os.WriteFile(name, data, 0600)
 }
 
-func signBytes(data []byte, local contract.Local) ([]byte, error) {
+func signBytes(ctx context.Context, data []byte, local contract.Local) ([]byte, error) {
 	dir, err := os.MkdirTemp("", "ghrepo-rpm-sign-*")
 	if err != nil {
 		return nil, err
@@ -167,11 +176,11 @@ func signBytes(data []byte, local contract.Local) ([]byte, error) {
 	if local.GPG.Keyring != "" {
 		args = append([]string{"--no-default-keyring", "--keyring", local.GPG.Keyring}, args...)
 	}
-	cmd := exec.Command("gpg", args...)
+	cmd := exec.CommandContext(ctx, "gpg", args...)
 	if local.GPG.Home != "" {
 		cmd.Env = append(os.Environ(), "GNUPGHOME="+local.GPG.Home)
 	}
-	if err := cmd.Run(); err != nil {
+	if err := progress.Run(ctx, cmd); err != nil {
 		return nil, errors.New("RPM package signing failed")
 	}
 	return os.ReadFile(output)
