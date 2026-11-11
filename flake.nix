@@ -139,6 +139,8 @@
           commitizen
           just
           markdownFormatter
+
+          vhs
         ];
       };
     });

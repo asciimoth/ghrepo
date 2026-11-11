@@ -47,6 +47,10 @@ demo-progress:
         --name 'ghrepo progress demo' "$demo_dir/ghrepo-progress-demo" \
         -test.run '^TestProgressDemo$' -test.v)
 
+# Render the offline repository walkthrough as a GIF (run in nix develop).
+vhs:
+    vhs demo.tape
+
 # Build the installable Nix package and check its dependency hash.
 test-flake:
     nix build .#ghrepo --no-link
