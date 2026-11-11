@@ -21,6 +21,7 @@ Commands:
   check         Check repository data and the rendered site
   publish       Build, check, commit, and push changes
   gc            List unreferenced GitHub release assets
+  cache clean   Remove downloaded packages from the local cache
   site-build    Build the Pages site
   readme-build  Render the repository README
 
@@ -46,6 +47,7 @@ var commandHelp = map[string]string{
 	"check":        "Usage: ghrepo check [--refresh-sources] [--dry-run]",
 	"publish":      "Usage: ghrepo publish [--dry-run] [--message TEXT]",
 	"gc":           "Usage: ghrepo gc",
+	"cache clean":  "Usage: ghrepo cache clean [--dry-run]\n\nRemove all local cached downloads. The next rebuild downloads packages again.",
 	"site-build":   "Usage: ghrepo site-build [--dry-run]",
 	"readme-build": "Usage: ghrepo readme-build [--dry-run]",
 }
@@ -61,6 +63,9 @@ func helpCommand(args []string) (string, bool) {
 		if args[1] == "metadata" {
 			return "metadata set", true
 		}
+		if args[1] == "cache" {
+			return "cache clean", true
+		}
 		return args[1], true
 	}
 	for _, arg := range args[1:] {
@@ -70,6 +75,9 @@ func helpCommand(args []string) (string, bool) {
 			}
 			if args[0] == "metadata" {
 				return "metadata set", true
+			}
+			if args[0] == "cache" {
+				return "cache clean", true
 			}
 			return args[0], true
 		}

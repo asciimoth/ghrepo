@@ -158,11 +158,14 @@ you are ready to deploy changes.
 | `ghrepo prune`                   | Preview retained paths eligible for removal.                                   |
 | `ghrepo prune --apply`           | Remove eligible retained paths from the manifest.                              |
 | `ghrepo rebuild`                 | Build, sign, and verify APT and RPM indexes.                                   |
+| `ghrepo cache clean`             | Remove the local cache, including downloaded packages.                         |
 | `ghrepo check`                   | Check cached packages, signatures, and site size; fetch invalid cache entries. |
 | `ghrepo check --refresh-sources` | Download and verify each source URL as well as checking the repository.        |
 
 `sync`, `rebuild`, `check`, and `site-build` download up to four packages at a
 time. Cached packages are reused by `sync`, `rebuild`, and normal `check`.
+To test a rebuild with fresh downloads, run `ghrepo cache clean` before
+`ghrepo rebuild`. Use `ghrepo cache clean --dry-run` to preview the removal.
 
 A selector has the form `FORMAT/NAME/ARCHITECTURE/VERSION`. For example:
 

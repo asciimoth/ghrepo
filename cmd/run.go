@@ -59,7 +59,7 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		return err
 	}
 	if len(args) == 0 {
-		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|metadata set|remove|prune|rebuild|check|publish|gc|site-build|readme-build")
+		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|metadata set|remove|prune|rebuild|check|publish|gc|cache clean|site-build|readme-build")
 	}
 	if command, ok := helpCommand(args); ok {
 		return c.printHelp(command)
@@ -68,7 +68,7 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		args = c.extractDryRun(args)
 	}
 	if len(args) == 0 {
-		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|remove|prune|rebuild|check|publish|gc|site-build|readme-build")
+		return errors.New("usage: ghrepo [--repo-dir DIR] init|add|update|replace|sync|source set|metadata set|remove|prune|rebuild|check|publish|gc|cache clean|site-build|readme-build")
 	}
 	switch args[0] {
 	case "init":
@@ -116,6 +116,11 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 		return c.publish(ctx, args[1:])
 	case "gc":
 		return c.gc(ctx, args[1:])
+	case "cache":
+		if len(args) != 2 || args[1] != "clean" {
+			return errors.New("usage: ghrepo cache clean [--dry-run]")
+		}
+		return c.cleanCache()
 	case "site-build":
 		if len(args) != 1 {
 			return errors.New("usage: ghrepo site-build")
@@ -135,6 +140,23 @@ func (c Runner) Run(ctx context.Context, args []string) error {
 	default:
 		return errors.New("unknown command")
 	}
+}
+
+func (c Runner) cleanCache() error {
+	_, _, root := c.paths()
+	if _, err := os.Lstat(root); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if c.dryRun {
+		return c.preview("would remove local cache in %s", root)
+	}
+	if err := os.RemoveAll(root); err != nil {
+		return err
+	}
+	return c.preview("removed local cache in %s", root)
 }
 
 func (c *Runner) extractDryRun(args []string) []string {

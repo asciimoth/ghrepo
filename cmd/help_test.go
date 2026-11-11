@@ -19,6 +19,7 @@ func TestHelp(t *testing.T) {
 		{"init", []string{"init", "--help"}, "Usage: ghrepo init"},
 		{"source", []string{"source", "--help"}, "Usage: ghrepo source set"},
 		{"source set", []string{"source", "set", "--help"}, "Usage: ghrepo source set"},
+		{"cache clean", []string{"cache", "clean", "--help"}, "Usage: ghrepo cache clean"},
 		{"repository directory", []string{"--repo-dir", t.TempDir(), "--help"}, "Commands:"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
