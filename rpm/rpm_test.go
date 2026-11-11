@@ -5,16 +5,55 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/xml"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/asciimoth/ghrepo/contract"
 	"github.com/asciimoth/ghrepo/inspect"
 )
+
+func TestPrimaryRPMNamespaces(t *testing.T) {
+	want := format{
+		XMLNS: rpmNS, License: "GPL-3.0-only",
+		Requires: dependencyList{Entries: []dependency{
+			{Name: "fixture-dependency", Flags: "GE", Epoch: "2", Ver: "1.0", Rel: "3"},
+			{Name: "unversioned-dependency"},
+		}},
+		Provides:  dependencyList{Entries: []dependency{{Name: "fixture-capability", Flags: "EQ", Ver: "1.0"}}},
+		Conflicts: dependencyList{Entries: []dependency{{Name: "fixture-conflict", Flags: "LT", Ver: "2.0"}}},
+		Obsoletes: dependencyList{Entries: []dependency{{Name: "fixture-obsolete", Flags: "LT", Ver: "1.0"}}},
+	}
+	raw, err := marshal(primary{XMLNS: commonNS, Packages: 1, Entries: []primaryPackage{{Format: want}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// DNF's parser needs the literal rpm prefix, even though a default
+	// namespace is equivalent for namespace-aware XML readers.
+	for _, tag := range []string{"license", "requires", "provides", "conflicts", "obsoletes", "entry"} {
+		if !bytes.Contains(raw, []byte("<rpm:"+tag)) {
+			t.Errorf("missing rpm:%s element in primary metadata: %s", tag, raw)
+		}
+	}
+	var decoded primary
+	if err := xml.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Entries) != 1 {
+		t.Fatalf("decoded %d packages", len(decoded.Entries))
+	}
+	// encoding/xml resolves namespace declarations rather than retaining
+	// the literal xmlns:rpm attribute used by the writer.
+	want.XMLNS = ""
+	if !reflect.DeepEqual(decoded.Entries[0].Format, want) {
+		t.Fatalf("RPM fields changed during XML round trip: got %+v, want %+v", decoded.Entries[0].Format, want)
+	}
+}
 
 func fixture(t *testing.T) (string, string, string, contract.Repository, contract.Manifest, contract.Local) {
 	return fixtureWithAlgorithm(t, "rsa2048")

@@ -72,6 +72,29 @@ type format struct {
 	Conflicts dependencyList `xml:"http://linux.duke.edu/metadata/rpm conflicts"`
 	Obsoletes dependencyList `xml:"http://linux.duke.edu/metadata/rpm obsoletes"`
 }
+
+func (f format) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	// DNF/libsolv matches literal rpm-prefixed names. Keep namespace-aware
+	// tags on format for decoding, but use explicit prefixes when encoding.
+	type prefixedDependencies struct {
+		Entries []dependency `xml:"rpm:entry"`
+	}
+	return e.EncodeElement(struct {
+		XMLNS     string               `xml:"xmlns:rpm,attr"`
+		License   string               `xml:"rpm:license"`
+		Requires  prefixedDependencies `xml:"rpm:requires"`
+		Provides  prefixedDependencies `xml:"rpm:provides"`
+		Conflicts prefixedDependencies `xml:"rpm:conflicts"`
+		Obsoletes prefixedDependencies `xml:"rpm:obsoletes"`
+	}{
+		XMLNS: rpmNS, License: f.License,
+		Requires:  prefixedDependencies(f.Requires),
+		Provides:  prefixedDependencies(f.Provides),
+		Conflicts: prefixedDependencies(f.Conflicts),
+		Obsoletes: prefixedDependencies(f.Obsoletes),
+	}, start)
+}
+
 type primaryPackage struct {
 	Type        string    `xml:"type,attr"`
 	Name        string    `xml:"name"`

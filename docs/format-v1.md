@@ -326,15 +326,17 @@ the local GPG keyring or agent to sign a general RPM header and its payload,
 writes a new copy, and verifies the copy against configured trusted keys. It
 never exports a private key. The caller must inspect, hash, and upload the final
 copy, then use that copy's hash and served path in `packages.yaml`. The optional
-local HTTP compatibility test uses RPM and DNF to check repository signature
-verification, refresh, lookup, and download. DNF 4 passes this test in the local
-Nix environment. It checks RPM installation in isolated RPM databases for both
-signature policies. With `GHREPO_RPM_INSTALL=1`, DNF installs the unsigned
+local HTTP compatibility test uses RPM, rpmbuild, and DNF to check repository
+signature verification, refresh, lookup, and download. It builds a local
+provider fixture and checks versioned requirements, provides, conflicts, and
+obsoletes through DNF. It checks RPM installation in isolated RPM databases for
+both signature policies. With `GHREPO_RPM_INSTALL=1`, DNF installs the unsigned
 fixture under `gpgcheck=0`, rejects it under `gpgcheck=1`, and installs the
-signed copy under `gpgcheck=1`. Run this option in a disposable root or user
-namespace environment. Neither tool is a normal host requirement. APT
-compatibility is checked by the local HTTP test where a working APT client is
-available.
+signed copy under `gpgcheck=1`. It also installs a consumer package and checks
+that DNF selects and installs its capability provider. Run this option in a
+disposable root or user namespace environment. These tools are not normal host
+requirements. APT compatibility is checked by the local HTTP test where a
+working APT client is available.
 
 ## Site artifact
 

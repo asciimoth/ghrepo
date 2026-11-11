@@ -27,7 +27,7 @@ func TestCompatibility(t *testing.T) {
 }
 
 func testCompatibility(t *testing.T, algorithm string) {
-	for _, tool := range []string{"rpm"} {
+	for _, tool := range []string{"rpm", "rpmbuild"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			if os.Getenv("GHREPO_RPM_INSTALL") == "1" {
 				t.Fatal(tool + " is required for the container compatibility test")
@@ -50,10 +50,16 @@ func testCompatibility(t *testing.T, algorithm string) {
 		t.Fatal(err)
 	}
 	root, pub, cacheRoot, r, m, local := fixtureWithAlgorithm(t, algorithm)
+	provider := buildDependencyProvider(t, root)
 	t.Chdir(root)
 	site := filepath.Join(root, "site")
-	for _, fixtureName := range []string{"payload-gzip.rpm", "payload-xz.rpm"} {
-		raw, err := os.ReadFile(filepath.Join(fixtureDir, fixtureName))
+	for _, fixturePath := range []string{
+		filepath.Join(fixtureDir, "payload-gzip.rpm"),
+		filepath.Join(fixtureDir, "payload-xz.rpm"),
+		filepath.Join(fixtureDir, "compat.rpm"),
+		provider,
+	} {
+		raw, err := os.ReadFile(fixturePath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,7 +68,7 @@ func testCompatibility(t *testing.T, algorithm string) {
 			t.Fatal(err)
 		}
 		sum := sha256.Sum256(raw)
-		p := contract.Package{URL: "https://example.com/" + fixtureName, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(raw)), Source: "upstream", State: "active", Format: "rpm", Identity: meta.Identity}
+		p := contract.Package{URL: "https://example.com/" + filepath.Base(fixturePath), SHA256: hex.EncodeToString(sum[:]), Size: int64(len(raw)), Source: "upstream", State: "active", Format: "rpm", Identity: meta.Identity}
 		p.Path, err = contract.ServedPath(p)
 		if err != nil {
 			t.Fatal(err)
@@ -116,6 +122,22 @@ func testCompatibility(t *testing.T, algorithm string) {
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("DNF makecache: %v: %s", err, output)
 		}
+		if policy == "0" {
+			for _, query := range []struct {
+				option, name, want string
+			}{
+				{"--requires", "ghrepo-compat", "fixture-dependency >= 1.0"},
+				{"--provides", "ghrepo-dependency-provider", "fixture-dependency = 1.0"},
+				{"--conflicts", "ghrepo-dependency-provider", "fixture-conflict < 2.0"},
+				{"--obsoletes", "ghrepo-dependency-provider", "fixture-obsolete < 1.0"},
+			} {
+				queryArgs := append(append([]string(nil), args[:len(args)-1]...), "repoquery", query.option, query.name)
+				output, err := exec.Command(dnfTool, queryArgs...).CombinedOutput()
+				if err != nil || !strings.Contains(string(output), query.want) {
+					t.Fatalf("DNF repoquery %s %s: want %q: %v: %s", query.option, query.name, query.want, err, output)
+				}
+			}
+		}
 		for _, p := range m.Packages {
 			query := append(append([]string(nil), args...), p.Identity.Name)
 			query[len(query)-2] = "repoquery"
@@ -138,6 +160,20 @@ func testCompatibility(t *testing.T, algorithm string) {
 			cmd.Dir = root
 			if output, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("DNF install: %v: %s", err, output)
+			}
+			if policy == "0" {
+				// Request only the consumer. DNF must select the provider through
+				// its versioned capability, not through its package name.
+				installArgs[len(installArgs)-1] = "ghrepo-compat"
+				if output, err := exec.Command(dnfTool, installArgs...).CombinedOutput(); err != nil {
+					t.Fatalf("DNF dependency install: %v: %s", err, output)
+				}
+				for _, name := range []string{"ghrepo-compat", "ghrepo-dependency-provider"} {
+					output, err := exec.Command("rpm", "--root", install, "--query", name).CombinedOutput()
+					if err != nil {
+						t.Fatalf("RPM installed dependency %s: %v: %s", name, err, output)
+					}
+				}
 			}
 		}
 	}
@@ -236,4 +272,37 @@ func testCompatibility(t *testing.T, algorithm string) {
 		t.Fatal(err)
 	}
 	runDNF("1")
+}
+
+func buildDependencyProvider(t *testing.T, root string) string {
+	t.Helper()
+	spec := filepath.Join(root, "provider.spec")
+	const contents = `Name: ghrepo-dependency-provider
+Version: 1.0
+Release: 1
+Summary: Provider for the repository dependency test
+License: GPL-3.0-only
+BuildArch: noarch
+Provides: fixture-dependency = 1.0
+Conflicts: fixture-conflict < 2.0
+Obsoletes: fixture-obsolete < 1.0
+
+%description
+Provides a versioned capability for the checked-in compatibility package.
+
+%install
+mkdir -p %{buildroot}/usr/share/ghrepo-dependency-provider
+printf 'provider\n' > %{buildroot}/usr/share/ghrepo-dependency-provider/data
+
+%files
+/usr/share/ghrepo-dependency-provider/data
+`
+	if err := os.WriteFile(spec, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("rpmbuild", "-bb", "--define", "_topdir "+root, spec)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build dependency provider: %v: %s", err, output)
+	}
+	return filepath.Join(root, "RPMS", "noarch", "ghrepo-dependency-provider-1.0-1.noarch.rpm")
 }
